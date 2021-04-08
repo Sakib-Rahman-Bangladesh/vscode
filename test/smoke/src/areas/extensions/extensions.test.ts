@@ -3,36 +3,27 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { SpectronApplication, Quality } from '../../spectron/application';
+import { Application, Quality } from '../../../../automation';
 
 export function setup() {
 	describe('Extensions', () => {
-		before(function () {
-			this.app.suiteName = 'Extensions';
-		});
-
-		it(`install and activate vscode-smoketest-check extension`, async function () {
-			const app = this.app as SpectronApplication;
+		it(`install and enable vscode-smoketest-check extension`, async function () {
+			const app = this.app as Application;
 
 			if (app.quality === Quality.Dev) {
 				this.skip();
-				return;
 			}
 
-			const extensionName = 'vscode-smoketest-check';
 			await app.workbench.extensions.openExtensionsViewlet();
 
-			const installed = await app.workbench.extensions.installExtension(extensionName);
-			assert.ok(installed);
+			await app.workbench.extensions.installExtension('michelkaporin.vscode-smoketest-check', true);
 
-			await app.reload();
-			await app.workbench.extensions.waitForExtensionsViewlet();
-			await app.workbench.quickopen.runCommand('Smoke Test Check');
+			// Close extension editor because keybindings dispatch is not working when web views are opened and focused
+			// https://github.com/microsoft/vscode/issues/110276
+			await app.workbench.extensions.closeExtension('vscode-smoketest-check');
 
-			const statusbarText = await app.workbench.statusbar.getStatusbarTextByTitle('smoke test');
-			await app.screenCapturer.capture('Statusbar');
-			assert.equal(statusbarText, 'VS Code Smoke Test Check');
+			await app.workbench.quickaccess.runCommand('Smoke Test Check');
 		});
+
 	});
 }

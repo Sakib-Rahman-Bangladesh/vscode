@@ -1,0 +1,16 @@
+{
+	"registrations": [
+		{
+			"component": {
+				"type": "git",
+				"git": {
+					"name": "seti-ui",
+					"repositoryUrl": "https://github.com/jesseweed/seti-ui",
+					"commitHash": "1a26ac62b6396c4273522cfb63e90059f52fe93b"
+				}
+			},
+			"version": "0.1.0"
+		}
+	],
+	"version": 1
+}

@@ -2,10 +2,8 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
-
 import * as assert from 'assert';
-import objects = require('vs/base/common/objects');
+import * as objects from 'vs/base/common/objects';
 
 let check = (one: any, other: any, msg: string) => {
 	assert(objects.equals(one, other), msg);
@@ -19,7 +17,7 @@ let checkNot = (one: any, other: any, msg: string) => {
 
 suite('Objects', () => {
 
-	test('equals', function () {
+	test('equals', () => {
 		check(null, null, 'null');
 		check(undefined, undefined, 'undefined');
 		check(1234, 1234, 'numbers');
@@ -62,10 +60,10 @@ suite('Objects', () => {
 
 		assert(foo.bar);
 		assert(Array.isArray(foo.bar));
-		assert.equal(foo.bar.length, 3);
-		assert.equal(foo.bar[0], 1);
-		assert.equal(foo.bar[1], 2);
-		assert.equal(foo.bar[2], 3);
+		assert.strictEqual(foo.bar.length, 3);
+		assert.strictEqual(foo.bar[0], 1);
+		assert.strictEqual(foo.bar[1], 2);
+		assert.strictEqual(foo.bar[2], 3);
 	});
 
 	test('mixin - no overwrite', function () {
@@ -79,7 +77,7 @@ suite('Objects', () => {
 
 		objects.mixin(foo, bar, false);
 
-		assert.equal(foo.bar, '123');
+		assert.strictEqual(foo.bar, '123');
 	});
 
 	test('cloneAndChange', () => {
@@ -88,10 +86,10 @@ suite('Objects', () => {
 			o1: o1,
 			o2: o1
 		};
-		assert.deepEqual(objects.cloneAndChange(o, () => { }), o);
+		assert.deepStrictEqual(objects.cloneAndChange(o, () => { }), o);
 	});
 
-	test('safeStringify', function () {
+	test('safeStringify', () => {
 		let obj1: any = {
 			friend: null
 		};
@@ -123,7 +121,7 @@ suite('Objects', () => {
 
 		let result = objects.safeStringify(circular);
 
-		assert.deepEqual(JSON.parse(result), {
+		assert.deepStrictEqual(JSON.parse(result), {
 			a: 42,
 			b: '[Circular]',
 			c: [
@@ -138,7 +136,7 @@ suite('Objects', () => {
 		});
 	});
 
-	test('distinct', function () {
+	test('distinct', () => {
 		let base = {
 			one: 'one',
 			two: 2,
@@ -149,12 +147,12 @@ suite('Objects', () => {
 		};
 
 		let diff = objects.distinct(base, base);
-		assert.deepEqual(diff, {});
+		assert.strictEqual(Object.keys(diff).length, 0);
 
 		let obj = {};
 
 		diff = objects.distinct(base, obj);
-		assert.deepEqual(diff, {});
+		assert.strictEqual(Object.keys(diff).length, 0);
 
 		obj = {
 			one: 'one',
@@ -162,7 +160,7 @@ suite('Objects', () => {
 		};
 
 		diff = objects.distinct(base, obj);
-		assert.deepEqual(diff, {});
+		assert.strictEqual(Object.keys(diff).length, 0);
 
 		obj = {
 			three: {
@@ -172,7 +170,7 @@ suite('Objects', () => {
 		};
 
 		diff = objects.distinct(base, obj);
-		assert.deepEqual(diff, {});
+		assert.strictEqual(Object.keys(diff).length, 0);
 
 		obj = {
 			one: 'two',
@@ -184,10 +182,9 @@ suite('Objects', () => {
 		};
 
 		diff = objects.distinct(base, obj);
-		assert.deepEqual(diff, {
-			one: 'two',
-			four: true
-		});
+		assert.strictEqual(Object.keys(diff).length, 2);
+		assert.strictEqual(diff.one, 'two');
+		assert.strictEqual(diff.four, true);
 
 		obj = {
 			one: null,
@@ -195,14 +192,13 @@ suite('Objects', () => {
 			three: {
 				3: true
 			},
-			four: void 0
+			four: undefined
 		};
 
 		diff = objects.distinct(base, obj);
-		assert.deepEqual(diff, {
-			one: null,
-			four: void 0
-		});
+		assert.strictEqual(Object.keys(diff).length, 2);
+		assert.strictEqual(diff.one, null);
+		assert.strictEqual(diff.four, undefined);
 
 		obj = {
 			one: 'two',
@@ -212,6 +208,23 @@ suite('Objects', () => {
 		};
 
 		diff = objects.distinct(base, obj);
-		assert.deepEqual(diff, obj);
+		assert.strictEqual(Object.keys(diff).length, 4);
+		assert.strictEqual(diff.one, 'two');
+		assert.strictEqual(diff.two, 3);
+		assert.strictEqual(diff.three?.['3'], false);
+		assert.strictEqual(diff.four, true);
+	});
+
+	test('getCaseInsensitive', () => {
+		const obj1 = {
+			lowercase: 123,
+			mIxEdCaSe: 456
+		};
+
+		assert.strictEqual(obj1.lowercase, objects.getCaseInsensitive(obj1, 'lowercase'));
+		assert.strictEqual(obj1.lowercase, objects.getCaseInsensitive(obj1, 'lOwErCaSe'));
+
+		assert.strictEqual(obj1.mIxEdCaSe, objects.getCaseInsensitive(obj1, 'MIXEDCASE'));
+		assert.strictEqual(obj1.mIxEdCaSe, objects.getCaseInsensitive(obj1, 'mixedcase'));
 	});
 });

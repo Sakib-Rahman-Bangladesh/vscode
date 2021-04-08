@@ -9,8 +9,8 @@ import { loadMessageBundle } from 'vscode-nls';
 const localize = loadMessageBundle();
 
 export default class MergeConflictCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
-	private codeLensRegistrationHandle: vscode.Disposable | null;
-	private config: interfaces.IExtensionConfiguration;
+	private codeLensRegistrationHandle?: vscode.Disposable | null;
+	private config?: interfaces.IExtensionConfiguration;
 	private tracker: interfaces.IDocumentMergeConflictTracker;
 
 	constructor(trackerService: interfaces.IDocumentMergeConflictTrackerService) {
@@ -53,8 +53,10 @@ export default class MergeConflictCodeLensProvider implements vscode.CodeLensPro
 		}
 
 		let conflicts = await this.tracker.getConflicts(document);
+		const conflictsCount = conflicts?.length ?? 0;
+		vscode.commands.executeCommand('setContext', 'mergeConflictsCount', conflictsCount);
 
-		if (!conflicts || conflicts.length === 0) {
+		if (!conflictsCount) {
 			return null;
 		}
 
@@ -100,6 +102,7 @@ export default class MergeConflictCodeLensProvider implements vscode.CodeLensPro
 		this.codeLensRegistrationHandle = vscode.languages.registerCodeLensProvider([
 			{ scheme: 'file' },
 			{ scheme: 'untitled' },
+			{ scheme: 'vscode-userdata' },
 		], this);
 	}
 }

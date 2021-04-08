@@ -3,25 +3,41 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
+import { localize } from 'vs/nls';
+import { Event } from 'vs/base/common/event';
 import { EditorInput } from 'vs/workbench/common/editor';
 import { SyncDescriptor } from 'vs/platform/instantiation/common/descriptors';
 import { Registry } from 'vs/platform/registry/common/platform';
-import { BaseEditor } from 'vs/workbench/browser/parts/editor/baseEditor';
-import { IConstructorSignature0, IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
-import { isArray } from 'vs/base/common/types';
-import URI from 'vs/base/common/uri';
-import { DataTransfers } from 'vs/base/browser/dnd';
-import { IEditorViewState } from 'vs/editor/common/editorCommon';
+import { EditorPane } from 'vs/workbench/browser/parts/editor/editorPane';
+import { IConstructorSignature0, IInstantiationService, BrandedService } from 'vs/platform/instantiation/common/instantiation';
+import { insert } from 'vs/base/common/arrays';
+import { IDisposable, toDisposable } from 'vs/base/common/lifecycle';
+import { IJSONSchema } from 'vs/base/common/jsonSchema';
+import { workbenchConfigurationNodeBase } from 'vs/workbench/common/configuration';
+import { Extensions as ConfigurationExtensions, IConfigurationNode, IConfigurationRegistry } from 'vs/platform/configuration/common/configurationRegistry';
+
+export const Extensions = {
+	Editors: 'workbench.contributions.editors',
+	Associations: 'workbench.editors.associations'
+};
+
+//#region Editors Registry
 
 export interface IEditorDescriptor {
-	instantiate(instantiationService: IInstantiationService): BaseEditor;
 
+	/**
+	 * The unique identifier of the editor
+	 */
 	getId(): string;
+
+	/**
+	 * The display name of the editor
+	 */
 	getName(): string;
 
-	describes(obj: any): boolean;
+	instantiate(instantiationService: IInstantiationService): EditorPane;
+
+	describes(obj: unknown): boolean;
 }
 
 export interface IEditorRegistry {
@@ -32,26 +48,25 @@ export interface IEditorRegistry {
 	 * input, the input itself will be asked which editor it prefers if this method is provided. Otherwise
 	 * the first editor in the list will be returned.
 	 *
-	 * @param editorInputDescriptor a constructor function that returns an instance of EditorInput for which the
+	 * @param inputDescriptors A set of constructor functions that return an instance of EditorInput for which the
 	 * registered editor should be used for.
 	 */
-	registerEditor(descriptor: IEditorDescriptor, editorInputDescriptor: SyncDescriptor<EditorInput>): void;
-	registerEditor(descriptor: IEditorDescriptor, editorInputDescriptor: SyncDescriptor<EditorInput>[]): void;
+	registerEditor(descriptor: IEditorDescriptor, inputDescriptors: readonly SyncDescriptor<EditorInput>[]): IDisposable;
 
 	/**
-	 * Returns the editor descriptor for the given input or null if none.
+	 * Returns the editor descriptor for the given input or `undefined` if none.
 	 */
-	getEditor(input: EditorInput): IEditorDescriptor;
+	getEditor(input: EditorInput): IEditorDescriptor | undefined;
 
 	/**
-	 * Returns the editor descriptor for the given identifier or null if none.
+	 * Returns the editor descriptor for the given identifier or `undefined` if none.
 	 */
-	getEditorById(editorId: string): IEditorDescriptor;
+	getEditorById(editorId: string): IEditorDescriptor | undefined;
 
 	/**
 	 * Returns an array of registered editors known to the platform.
 	 */
-	getEditors(): IEditorDescriptor[];
+	getEditors(): readonly IEditorDescriptor[];
 }
 
 /**
@@ -59,68 +74,62 @@ export interface IEditorRegistry {
  * can load lazily in the workbench.
  */
 export class EditorDescriptor implements IEditorDescriptor {
-	private ctor: IConstructorSignature0<BaseEditor>;
-	private id: string;
-	private name: string;
 
-	constructor(ctor: IConstructorSignature0<BaseEditor>, id: string, name: string) {
-		this.ctor = ctor;
-		this.id = id;
-		this.name = name;
+	static create<Services extends BrandedService[]>(
+		ctor: { new(...services: Services): EditorPane },
+		id: string,
+		name: string
+	): EditorDescriptor {
+		return new EditorDescriptor(ctor as IConstructorSignature0<EditorPane>, id, name);
 	}
 
-	public instantiate(instantiationService: IInstantiationService): BaseEditor {
+	constructor(
+		private readonly ctor: IConstructorSignature0<EditorPane>,
+		private readonly id: string,
+		private readonly name: string
+	) { }
+
+	instantiate(instantiationService: IInstantiationService): EditorPane {
 		return instantiationService.createInstance(this.ctor);
 	}
 
-	public getId(): string {
+	getId(): string {
 		return this.id;
 	}
 
-	public getName(): string {
+	getName(): string {
 		return this.name;
 	}
 
-	public describes(obj: any): boolean {
-		return obj instanceof BaseEditor && (<BaseEditor>obj).getId() === this.id;
+	describes(obj: unknown): boolean {
+		return obj instanceof EditorPane && obj.getId() === this.id;
 	}
 }
 
-const INPUT_DESCRIPTORS_PROPERTY = '__$inputDescriptors';
-
 class EditorRegistry implements IEditorRegistry {
-	private editors: EditorDescriptor[];
 
-	constructor() {
-		this.editors = [];
+	private readonly editors: EditorDescriptor[] = [];
+	private readonly mapEditorToInputs = new Map<EditorDescriptor, readonly SyncDescriptor<EditorInput>[]>();
+
+	registerEditor(descriptor: EditorDescriptor, inputDescriptors: readonly SyncDescriptor<EditorInput>[]): IDisposable {
+		this.mapEditorToInputs.set(descriptor, inputDescriptors);
+
+		const remove = insert(this.editors, descriptor);
+
+		return toDisposable(() => {
+			this.mapEditorToInputs.delete(descriptor);
+			remove();
+		});
 	}
 
-	public registerEditor(descriptor: EditorDescriptor, editorInputDescriptor: SyncDescriptor<EditorInput>): void;
-	public registerEditor(descriptor: EditorDescriptor, editorInputDescriptor: SyncDescriptor<EditorInput>[]): void;
-	public registerEditor(descriptor: EditorDescriptor, editorInputDescriptor: any): void {
-
-		// Support both non-array and array parameter
-		let inputDescriptors: SyncDescriptor<EditorInput>[] = [];
-		if (!isArray(editorInputDescriptor)) {
-			inputDescriptors.push(editorInputDescriptor);
-		} else {
-			inputDescriptors = editorInputDescriptor;
-		}
-
-		// Register (Support multiple Editors per Input)
-		descriptor[INPUT_DESCRIPTORS_PROPERTY] = inputDescriptors;
-		this.editors.push(descriptor);
-	}
-
-	public getEditor(input: EditorInput): EditorDescriptor {
+	getEditor(input: EditorInput): EditorDescriptor | undefined {
 		const findEditorDescriptors = (input: EditorInput, byInstanceOf?: boolean): EditorDescriptor[] => {
 			const matchingDescriptors: EditorDescriptor[] = [];
 
-			for (let i = 0; i < this.editors.length; i++) {
-				const editor = this.editors[i];
-				const inputDescriptors = <SyncDescriptor<EditorInput>[]>editor[INPUT_DESCRIPTORS_PROPERTY];
-				for (let j = 0; j < inputDescriptors.length; j++) {
-					const inputClass = inputDescriptors[j].ctor;
+			for (const editor of this.editors) {
+				const inputDescriptors = this.mapEditorToInputs.get(editor) || [];
+				for (const inputDescriptor of inputDescriptors) {
+					const inputClass = inputDescriptor.ctor;
 
 					// Direct check on constructor type (ignores prototype chain)
 					if (!byInstanceOf && input.constructor === inputClass) {
@@ -149,7 +158,7 @@ class EditorRegistry implements IEditorRegistry {
 		};
 
 		const descriptors = findEditorDescriptors(input);
-		if (descriptors && descriptors.length > 0) {
+		if (descriptors.length > 0) {
 
 			// Ask the input for its preferred Editor
 			const preferredEditorId = input.getPreferredEditorId(descriptors.map(d => d.getId()));
@@ -161,117 +170,161 @@ class EditorRegistry implements IEditorRegistry {
 			return descriptors[0];
 		}
 
-		return null;
+		return undefined;
 	}
 
-	public getEditorById(editorId: string): EditorDescriptor {
-		for (let i = 0; i < this.editors.length; i++) {
-			const editor = this.editors[i];
-			if (editor.getId() === editorId) {
-				return editor;
-			}
-		}
-
-		return null;
+	getEditorById(editorId: string): EditorDescriptor | undefined {
+		return this.editors.find(editor => editor.getId() === editorId);
 	}
 
-	public getEditors(): EditorDescriptor[] {
+	getEditors(): readonly EditorDescriptor[] {
 		return this.editors.slice(0);
 	}
 
-	public setEditors(editorsToSet: EditorDescriptor[]): void {
-		this.editors = editorsToSet;
-	}
-
-	public getEditorInputs(): any[] {
-		const inputClasses: any[] = [];
-		for (let i = 0; i < this.editors.length; i++) {
-			const editor = this.editors[i];
-			const editorInputDescriptors = <SyncDescriptor<EditorInput>[]>editor[INPUT_DESCRIPTORS_PROPERTY];
-			inputClasses.push(...editorInputDescriptors.map(descriptor => descriptor.ctor));
+	getEditorInputs(): SyncDescriptor<EditorInput>[] {
+		const inputClasses: SyncDescriptor<EditorInput>[] = [];
+		for (const editor of this.editors) {
+			const editorInputDescriptors = this.mapEditorToInputs.get(editor);
+			if (editorInputDescriptors) {
+				inputClasses.push(...editorInputDescriptors.map(descriptor => descriptor.ctor));
+			}
 		}
 
 		return inputClasses;
 	}
 }
 
-export const Extensions = {
-	Editors: 'workbench.contributions.editors'
-};
-
 Registry.add(Extensions.Editors, new EditorRegistry());
 
-export interface IDraggedResource {
-	resource: URI;
-	isExternal: boolean;
-}
+//#endregion
 
-export interface IDraggedEditor extends IDraggedResource {
-	backupResource?: URI;
-	viewState?: IEditorViewState;
-}
 
-export interface ISerializedDraggedEditor {
-	resource: string;
-	backupResource: string;
-	viewState: IEditorViewState;
-}
+//#region Editor Associations
 
-export const CodeDataTransfers = {
-	EDITOR: 'CodeEditor'
+export const editorsAssociationsSettingId = 'workbench.editorAssociations';
+
+export const DEFAULT_EDITOR_ASSOCIATION: IEditorType = {
+	id: 'default',
+	displayName: localize('promptOpenWith.defaultEditor.displayName', "Text Editor"),
+	providerDisplayName: localize('builtinProviderDisplayName', "Built-in")
 };
 
-export function extractResources(e: DragEvent, externalOnly?: boolean): (IDraggedResource | IDraggedEditor)[] {
-	const resources: (IDraggedResource | IDraggedEditor)[] = [];
-	if (e.dataTransfer.types.length > 0) {
+export type EditorAssociation = {
+	readonly viewType: string;
+	readonly filenamePattern?: string;
+};
 
-		// Check for window-to-window DND
-		if (!externalOnly) {
+export type EditorsAssociations = readonly EditorAssociation[];
 
-			// Data Transfer: Code Editor
-			const rawEditorData = e.dataTransfer.getData(CodeDataTransfers.EDITOR);
-			if (rawEditorData) {
-				try {
-					const draggedEditor = JSON.parse(rawEditorData) as ISerializedDraggedEditor;
-					resources.push({ resource: URI.parse(draggedEditor.resource), backupResource: URI.parse(draggedEditor.backupResource), viewState: draggedEditor.viewState, isExternal: false });
-				} catch (error) {
-					// Invalid URI
-				}
-			}
+const configurationRegistry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
 
-			// Data Transfer: URL
-			else {
-				try {
-					const rawURLsData = e.dataTransfer.getData(DataTransfers.URLS);
-					if (rawURLsData) {
-						const uriStrArray: string[] = JSON.parse(rawURLsData);
-						resources.push(...uriStrArray.map(uriStr => ({ resource: URI.parse(uriStr), isExternal: false })));
-					} else {
-						const rawURLData = e.dataTransfer.getData(DataTransfers.URL);
-						if (rawURLData) {
-							resources.push({ resource: URI.parse(rawURLData), isExternal: false });
-						}
+const editorTypeSchemaAddition: IJSONSchema = {
+	type: 'string',
+	enum: []
+};
+
+const editorAssociationsConfigurationNode: IConfigurationNode = {
+	...workbenchConfigurationNodeBase,
+	properties: {
+		'workbench.editorAssociations': {
+			type: 'array',
+			markdownDescription: localize('editor.editorAssociations', "Configure which editor to use for specific file types."),
+			items: {
+				type: 'object',
+				defaultSnippets: [{
+					body: {
+						'viewType': '$1',
+						'filenamePattern': '$2'
 					}
-				} catch (error) {
-					// Invalid URI
-				}
-			}
-		}
-
-		// Check for native file transfer
-		if (e.dataTransfer && e.dataTransfer.files) {
-			for (let i = 0; i < e.dataTransfer.files.length; i++) {
-				const file = e.dataTransfer.files[i] as { path: string };
-				if (file && file.path) {
-					try {
-						resources.push({ resource: URI.file(file.path), isExternal: true });
-					} catch (error) {
-						// Invalid URI
+				}],
+				properties: {
+					'viewType': {
+						anyOf: [
+							{
+								type: 'string',
+								description: localize('editor.editorAssociations.viewType', "The unique id of the editor to use."),
+							},
+							editorTypeSchemaAddition
+						]
+					},
+					'filenamePattern': {
+						type: 'string',
+						description: localize('editor.editorAssociations.filenamePattern', "Glob pattern specifying which files the editor should be used for."),
 					}
 				}
 			}
 		}
 	}
+};
 
-	return resources;
+export interface IEditorType {
+	readonly id: string;
+	readonly displayName: string;
+	readonly providerDisplayName: string;
 }
+
+export interface IEditorTypesHandler {
+	readonly onDidChangeEditorTypes: Event<void>;
+
+	getEditorTypes(): IEditorType[];
+}
+
+export interface IEditorAssociationsRegistry {
+
+	/**
+	 * Register handlers for editor types
+	 */
+	registerEditorTypesHandler(id: string, handler: IEditorTypesHandler): IDisposable;
+}
+
+class EditorAssociationsRegistry implements IEditorAssociationsRegistry {
+
+	private readonly editorTypesHandlers = new Map<string, IEditorTypesHandler>();
+
+	registerEditorTypesHandler(id: string, handler: IEditorTypesHandler): IDisposable {
+		if (this.editorTypesHandlers.has(id)) {
+			throw new Error(`An editor type handler with ${id} was already registered.`);
+		}
+
+		this.editorTypesHandlers.set(id, handler);
+		this.updateEditorAssociationsSchema();
+
+		const editorTypeChangeEvent = handler.onDidChangeEditorTypes(() => {
+			this.updateEditorAssociationsSchema();
+		});
+
+		return {
+			dispose: () => {
+				editorTypeChangeEvent.dispose();
+				this.editorTypesHandlers.delete(id);
+				this.updateEditorAssociationsSchema();
+			}
+		};
+	}
+
+	private updateEditorAssociationsSchema() {
+		const enumValues: string[] = [];
+		const enumDescriptions: string[] = [];
+
+		const editorTypes: IEditorType[] = [DEFAULT_EDITOR_ASSOCIATION];
+
+		for (const [, handler] of this.editorTypesHandlers) {
+			editorTypes.push(...handler.getEditorTypes());
+		}
+
+		for (const { id, providerDisplayName } of editorTypes) {
+			enumValues.push(id);
+			enumDescriptions.push(localize('editorAssociations.viewType.sourceDescription', "Source: {0}", providerDisplayName));
+		}
+
+		editorTypeSchemaAddition.enum = enumValues;
+		editorTypeSchemaAddition.enumDescriptions = enumDescriptions;
+
+		configurationRegistry.notifyConfigurationSchemaUpdated(editorAssociationsConfigurationNode);
+	}
+}
+
+Registry.add(Extensions.Associations, new EditorAssociationsRegistry());
+configurationRegistry.registerConfiguration(editorAssociationsConfigurationNode);
+
+//#endregion

@@ -2,37 +2,46 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
 import * as assert from 'assert';
-import { TextModel } from 'vs/editor/common/model/textModel';
-import { MirrorTextModel } from 'vs/editor/common/model/mirrorTextModel';
 import { Position } from 'vs/editor/common/core/position';
+import { EndOfLinePreference, EndOfLineSequence, IIdentifiedSingleEditOperation } from 'vs/editor/common/model';
+import { MirrorTextModel } from 'vs/editor/common/model/mirrorTextModel';
+import { TextModel } from 'vs/editor/common/model/textModel';
 import { IModelContentChangedEvent } from 'vs/editor/common/model/textModelEvents';
-import { EndOfLinePreference, IIdentifiedSingleEditOperation, EndOfLineSequence } from 'vs/editor/common/model';
+import { createTextModel } from 'vs/editor/test/common/editorTestUtils';
 
 export function testApplyEditsWithSyncedModels(original: string[], edits: IIdentifiedSingleEditOperation[], expected: string[], inputEditsAreInvalid: boolean = false): void {
-	var originalStr = original.join('\n');
-	var expectedStr = expected.join('\n');
+	let originalStr = original.join('\n');
+	let expectedStr = expected.join('\n');
 
 	assertSyncedModels(originalStr, (model, assertMirrorModels) => {
 		// Apply edits & collect inverse edits
-		var inverseEdits = model.applyEdits(edits);
+		let inverseEdits = model.applyEdits(edits, true);
 
 		// Assert edits produced expected result
-		assert.deepEqual(model.getValue(EndOfLinePreference.LF), expectedStr);
+		assert.deepStrictEqual(model.getValue(EndOfLinePreference.LF), expectedStr);
 
 		assertMirrorModels();
 
 		// Apply the inverse edits
-		var inverseInverseEdits = model.applyEdits(inverseEdits);
+		let inverseInverseEdits = model.applyEdits(inverseEdits, true);
 
 		// Assert the inverse edits brought back model to original state
-		assert.deepEqual(model.getValue(EndOfLinePreference.LF), originalStr);
+		assert.deepStrictEqual(model.getValue(EndOfLinePreference.LF), originalStr);
 
 		if (!inputEditsAreInvalid) {
+			const simplifyEdit = (edit: IIdentifiedSingleEditOperation) => {
+				return {
+					identifier: edit.identifier,
+					range: edit.range,
+					text: edit.text,
+					forceMoveMarkers: edit.forceMoveMarkers || false,
+					isAutoWhitespaceEdit: edit.isAutoWhitespaceEdit || false
+				};
+			};
 			// Assert the inverse of the inverse edits are the original edits
-			assert.deepEqual(inverseInverseEdits, edits);
+			assert.deepStrictEqual(inverseInverseEdits.map(simplifyEdit), edits.map(simplifyEdit));
 		}
 
 		assertMirrorModels();
@@ -50,16 +59,16 @@ function assertOneDirectionLineMapping(model: TextModel, direction: AssertDocume
 	let line = 1, column = 1, previousIsCarriageReturn = false;
 	for (let offset = 0; offset <= allText.length; offset++) {
 		// The position coordinate system cannot express the position between \r and \n
-		let position = new Position(line, column + (previousIsCarriageReturn ? -1 : 0));
+		let position: Position = new Position(line, column + (previousIsCarriageReturn ? -1 : 0));
 
 		if (direction === AssertDocumentLineMappingDirection.OffsetToPosition) {
 			let actualPosition = model.getPositionAt(offset);
-			assert.equal(actualPosition.toString(), position.toString(), msg + ' - getPositionAt mismatch for offset ' + offset);
+			assert.strictEqual(actualPosition.toString(), position.toString(), msg + ' - getPositionAt mismatch for offset ' + offset);
 		} else {
 			// The position coordinate system cannot express the position between \r and \n
-			let expectedOffset = offset + (previousIsCarriageReturn ? -1 : 0);
+			let expectedOffset: number = offset + (previousIsCarriageReturn ? -1 : 0);
 			let actualOffset = model.getOffsetAt(position);
-			assert.equal(actualOffset, expectedOffset, msg + ' - getOffsetAt mismatch for position ' + position.toString());
+			assert.strictEqual(actualOffset, expectedOffset, msg + ' - getOffsetAt mismatch for position ' + position.toString());
 		}
 
 		if (allText.charAt(offset) === '\n') {
@@ -79,8 +88,8 @@ function assertLineMapping(model: TextModel, msg: string): void {
 }
 
 
-export function assertSyncedModels(text: string, callback: (model: TextModel, assertMirrorModels: () => void) => void, setup: (model: TextModel) => void = null): void {
-	var model = new TextModel(text, TextModel.DEFAULT_CREATION_OPTIONS, null);
+export function assertSyncedModels(text: string, callback: (model: TextModel, assertMirrorModels: () => void) => void, setup: ((model: TextModel) => void) | null = null): void {
+	let model = createTextModel(text, TextModel.DEFAULT_CREATION_OPTIONS, null);
 	model.setEOL(EndOfLineSequence.LF);
 	assertLineMapping(model, 'model');
 
@@ -89,8 +98,8 @@ export function assertSyncedModels(text: string, callback: (model: TextModel, as
 		assertLineMapping(model, 'model');
 	}
 
-	var mirrorModel2 = new MirrorTextModel(null, model.getLinesContent(), model.getEOL(), model.getVersionId());
-	var mirrorModel2PrevVersionId = model.getVersionId();
+	let mirrorModel2 = new MirrorTextModel(null!, model.getLinesContent(), model.getEOL(), model.getVersionId());
+	let mirrorModel2PrevVersionId = model.getVersionId();
 
 	model.onDidChangeContent((e: IModelContentChangedEvent) => {
 		let versionId = e.versionId;
@@ -101,10 +110,10 @@ export function assertSyncedModels(text: string, callback: (model: TextModel, as
 		mirrorModel2.onEvents(e);
 	});
 
-	var assertMirrorModels = () => {
+	let assertMirrorModels = () => {
 		assertLineMapping(model, 'model');
-		assert.equal(mirrorModel2.getText(), model.getValue(), 'mirror model 2 text OK');
-		assert.equal(mirrorModel2.version, model.getVersionId(), 'mirror model 2 version OK');
+		assert.strictEqual(mirrorModel2.getText(), model.getValue(), 'mirror model 2 text OK');
+		assert.strictEqual(mirrorModel2.version, model.getVersionId(), 'mirror model 2 version OK');
 	};
 
 	callback(model, assertMirrorModels);

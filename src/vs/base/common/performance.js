@@ -5,142 +5,119 @@
 
 'use strict';
 
-/*global define*/
+//@ts-check
 
-// This module can be loaded in an amd and commonjs-context.
-// Because we want both instances to use the same perf-data
-// we store them globally
-// stores data as 'type','name','startTime','duration'
-global._performanceEntries = global._performanceEntries || [];
+(function () {
 
-if (typeof define !== "function" && typeof module === "object" && typeof module.exports === "object") {
-	// this is commonjs, fake amd
-	global.define = function (dep, callback) {
-		module.exports = callback();
-		global.define = undefined;
-	};
-}
+	/**
+	 * @returns {{mark(name:string):void, getMarks():{name:string, startTime:number}[]}}
+	 */
+	function _definePolyfillMarks(timeOrigin) {
 
-define([], function () {
+		const _data = [];
+		if (typeof timeOrigin === 'number') {
+			_data.push('code/timeOrigin', timeOrigin);
+		}
 
-	// const _now = global.performance && performance.now ? performance.now : Date.now
-	const _now = Date.now;
-
-	function importEntries(entries) {
-		global._performanceEntries.splice(0, 0, ...entries);
-	}
-
-	function exportEntries() {
-		return global._performanceEntries.slice(0);
-	}
-
-	function getEntries(type, name) {
-		const result = [];
-		const entries = global._performanceEntries;
-		for (let i = 0; i < entries.length; i += 4) {
-			if (entries[i] === type && (name === void 0 || entries[i + 1] === name)) {
+		function mark(name) {
+			_data.push(name, Date.now());
+		}
+		function getMarks() {
+			const result = [];
+			for (let i = 0; i < _data.length; i += 2) {
 				result.push({
-					type: entries[i],
-					name: entries[i + 1],
-					startTime: entries[i + 2],
-					duration: entries[i + 3],
+					name: _data[i],
+					startTime: _data[i + 1],
 				});
 			}
+			return result;
 		}
-
-		return result.sort((a, b) => {
-			return a.startTime - b.startTime;
-		});
+		return { mark, getMarks };
 	}
 
-	function getEntry(type, name) {
-		const entries = global._performanceEntries;
-		for (let i = 0; i < entries.length; i += 4) {
-			if (entries[i] === type && entries[i + 1] === name) {
+	/**
+	 * @returns {{mark(name:string):void, getMarks():{name:string, startTime:number}[]}}
+	 */
+	function _define() {
+
+		if (typeof performance === 'object' && typeof performance.mark === 'function') {
+			// in a browser context, reuse performance-util
+
+			if (typeof performance.timeOrigin !== 'number' && !performance.timing) {
+				// safari & webworker: because there is no timeOrigin and no workaround
+				// we use the `Date.now`-based polyfill.
+				return _definePolyfillMarks();
+
+			} else {
+				// use "native" performance for mark and getMarks
 				return {
-					type: entries[i],
-					name: entries[i + 1],
-					startTime: entries[i + 2],
-					duration: entries[i + 3],
+					mark(name) {
+						performance.mark(name);
+					},
+					getMarks() {
+						let timeOrigin = performance.timeOrigin;
+						if (typeof timeOrigin !== 'number') {
+							// safari: there is no timerOrigin but in renderers there is the timing-property
+							// see https://bugs.webkit.org/show_bug.cgi?id=174862
+							timeOrigin = performance.timing.navigationStart || performance.timing.redirectStart || performance.timing.fetchStart;
+						}
+						const result = [{ name: 'code/timeOrigin', startTime: Math.round(timeOrigin) }];
+						for (const entry of performance.getEntriesByType('mark')) {
+							result.push({
+								name: entry.name,
+								startTime: Math.round(timeOrigin + entry.startTime)
+							});
+						}
+						return result;
+					}
 				};
 			}
-		}
-	}
 
-	function getDuration(from, to) {
-		const entries = global._performanceEntries;
-		let name = from;
-		let startTime = 0;
-		for (let i = 0; i < entries.length; i += 4) {
-			if (entries[i + 1] === name) {
-				if (name === from) {
-					// found `from` (start of interval)
-					name = to;
-					startTime = entries[i + 2];
-				} else {
-					// from `to` (end of interval)
-					return entries[i + 2] - startTime;
-				}
-			}
-		}
-		return 0;
-	}
+		} else if (typeof process === 'object') {
+			// node.js: use the normal polyfill but add the timeOrigin
+			// from the node perf_hooks API as very first mark
+			const timeOrigin = Math.round((require.nodeRequire || require)('perf_hooks').performance.timeOrigin);
+			return _definePolyfillMarks(timeOrigin);
 
-	function mark(name) {
-		global._performanceEntries.push('mark', name, _now(), 0);
-		if (typeof console.timeStamp === 'function') {
-			console.timeStamp(name);
-		}
-	}
-
-	function time(name) {
-		let from = `${name}/start`;
-		mark(from);
-		return { stop() { measure(name, from); } };
-	}
-
-	function measure(name, from, to) {
-
-		let startTime;
-		let duration;
-		let now = _now();
-
-		if (!from) {
-			startTime = now;
 		} else {
-			startTime = _getLastStartTime(from);
+			// unknown environment
+			console.trace('perf-util loaded in UNKNOWN environment');
+			return _definePolyfillMarks();
 		}
-
-		if (!to) {
-			duration = now - startTime;
-		} else {
-			duration = _getLastStartTime(to) - startTime;
-		}
-
-		global._performanceEntries.push('measure', name, startTime, duration);
 	}
 
-	function _getLastStartTime(name) {
-		const entries = global._performanceEntries;
-		for (let i = entries.length - 1; i >= 0; i -= 4) {
-			if (entries[i - 2] === name) {
-				return entries[i - 1];
-			}
+	function _factory(sharedObj) {
+		if (!sharedObj.MonacoPerformanceMarks) {
+			sharedObj.MonacoPerformanceMarks = _define();
 		}
-
-		throw new Error(name + ' not found');
+		return sharedObj.MonacoPerformanceMarks;
 	}
 
-	var exports = {
-		mark: mark,
-		measure: measure,
-		time: time,
-		getEntries: getEntries,
-		getEntry: getEntry,
-		getDuration: getDuration,
-		importEntries: importEntries,
-		exportEntries: exportEntries
-	};
+	// This module can be loaded in an amd and commonjs-context.
+	// Because we want both instances to use the same perf-data
+	// we store them globally
 
-	return exports;
-});
+	// eslint-disable-next-line no-var
+	var sharedObj;
+	if (typeof global === 'object') {
+		// nodejs
+		sharedObj = global;
+	} else if (typeof self === 'object') {
+		// browser
+		sharedObj = self;
+	} else {
+		sharedObj = {};
+	}
+
+	if (typeof define === 'function') {
+		// amd
+		define([], function () { return _factory(sharedObj); });
+	} else if (typeof module === 'object' && typeof module.exports === 'object') {
+		// commonjs
+		module.exports = _factory(sharedObj);
+	} else {
+		console.trace('perf-util defined in UNKNOWN context (neither requirejs or commonjs)');
+		sharedObj.perf = _factory(sharedObj);
+	}
+
+})();

@@ -2,14 +2,13 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
 import * as assert from 'assert';
-import { TextAreaState, ITextAreaWrapper, PagedScreenReaderStrategy } from 'vs/editor/browser/controller/textAreaState';
-import { Position } from 'vs/editor/common/core/position';
 import { Disposable } from 'vs/base/common/lifecycle';
-import { TextModel } from 'vs/editor/common/model/textModel';
+import { ITextAreaWrapper, PagedScreenReaderStrategy, TextAreaState } from 'vs/editor/browser/controller/textAreaState';
+import { Position } from 'vs/editor/common/core/position';
 import { Selection } from 'vs/editor/common/core/selection';
+import { createTextModel } from 'vs/editor/test/common/editorTestUtils';
 
 export class MockTextAreaWrapper extends Disposable implements ITextAreaWrapper {
 
@@ -82,11 +81,11 @@ suite('TextAreaState', () => {
 		textArea._value = 'Hello world!';
 		textArea._selectionStart = 1;
 		textArea._selectionEnd = 12;
-		let actual = TextAreaState.EMPTY.readFromTextArea(textArea);
+		let actual = TextAreaState.readFromTextArea(textArea);
 
 		assertTextAreaState(actual, 'Hello world!', 1, 12);
-		assert.equal(actual.value, 'Hello world!');
-		assert.equal(actual.selectionStart, 1);
+		assert.strictEqual(actual.value, 'Hello world!');
+		assert.strictEqual(actual.selectionStart, 1);
 
 		actual = actual.collapseSelection();
 		assertTextAreaState(actual, 'Hello world!', 12, 12);
@@ -103,28 +102,28 @@ suite('TextAreaState', () => {
 		let state = new TextAreaState('Hi world!', 2, 2, null, null);
 		state.writeToTextArea('test', textArea, false);
 
-		assert.equal(textArea._value, 'Hi world!');
-		assert.equal(textArea._selectionStart, 9);
-		assert.equal(textArea._selectionEnd, 9);
+		assert.strictEqual(textArea._value, 'Hi world!');
+		assert.strictEqual(textArea._selectionStart, 9);
+		assert.strictEqual(textArea._selectionEnd, 9);
 
 		state = new TextAreaState('Hi world!', 3, 3, null, null);
 		state.writeToTextArea('test', textArea, false);
 
-		assert.equal(textArea._value, 'Hi world!');
-		assert.equal(textArea._selectionStart, 9);
-		assert.equal(textArea._selectionEnd, 9);
+		assert.strictEqual(textArea._value, 'Hi world!');
+		assert.strictEqual(textArea._selectionStart, 9);
+		assert.strictEqual(textArea._selectionEnd, 9);
 
 		state = new TextAreaState('Hi world!', 0, 2, null, null);
 		state.writeToTextArea('test', textArea, true);
 
-		assert.equal(textArea._value, 'Hi world!');
-		assert.equal(textArea._selectionStart, 0);
-		assert.equal(textArea._selectionEnd, 2);
+		assert.strictEqual(textArea._value, 'Hi world!');
+		assert.strictEqual(textArea._selectionStart, 0);
+		assert.strictEqual(textArea._selectionEnd, 2);
 
 		textArea.dispose();
 	});
 
-	function testDeduceInput(prevState: TextAreaState, value: string, selectionStart: number, selectionEnd: number, expected: string, expectedCharReplaceCnt: number): void {
+	function testDeduceInput(prevState: TextAreaState | null, value: string, selectionStart: number, selectionEnd: number, couldBeEmojiInput: boolean, expected: string, expectedCharReplaceCnt: number): void {
 		prevState = prevState || TextAreaState.EMPTY;
 
 		let textArea = new MockTextAreaWrapper();
@@ -132,11 +131,15 @@ suite('TextAreaState', () => {
 		textArea._selectionStart = selectionStart;
 		textArea._selectionEnd = selectionEnd;
 
-		let newState = prevState.readFromTextArea(textArea);
-		let actual = TextAreaState.deduceInput(prevState, newState, true);
+		let newState = TextAreaState.readFromTextArea(textArea);
+		let actual = TextAreaState.deduceInput(prevState, newState, couldBeEmojiInput);
 
-		assert.equal(actual.text, expected);
-		assert.equal(actual.replaceCharCnt, expectedCharReplaceCnt);
+		assert.deepStrictEqual(actual, {
+			text: expected,
+			replacePrevCharCnt: expectedCharReplaceCnt,
+			replaceNextCharCnt: 0,
+			positionDelta: 0,
+		});
 
 		textArea.dispose();
 	}
@@ -154,7 +157,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			TextAreaState.EMPTY,
 			'ｓ',
-			0, 1,
+			0, 1, true,
 			'ｓ', 0
 		);
 
@@ -164,7 +167,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('ｓ', 0, 1, null, null),
 			'せ',
-			0, 1,
+			0, 1, true,
 			'せ', 1
 		);
 
@@ -174,7 +177,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('せ', 0, 1, null, null),
 			'せｎ',
-			0, 2,
+			0, 2, true,
 			'せｎ', 1
 		);
 
@@ -184,7 +187,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('せｎ', 0, 2, null, null),
 			'せん',
-			0, 2,
+			0, 2, true,
 			'せん', 2
 		);
 
@@ -194,7 +197,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('せん', 0, 2, null, null),
 			'せんｓ',
-			0, 3,
+			0, 3, true,
 			'せんｓ', 2
 		);
 
@@ -204,7 +207,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('せんｓ', 0, 3, null, null),
 			'せんせ',
-			0, 3,
+			0, 3, true,
 			'せんせ', 3
 		);
 
@@ -214,7 +217,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('せんせ', 0, 3, null, null),
 			'せんせ',
-			0, 3,
+			0, 3, true,
 			'せんせ', 3
 		);
 
@@ -224,7 +227,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('せんせ', 0, 3, null, null),
 			'せんせい',
-			0, 4,
+			0, 4, true,
 			'せんせい', 3
 		);
 
@@ -234,7 +237,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('せんせい', 0, 4, null, null),
 			'せんせい',
-			4, 4,
+			4, 4, true,
 			'', 0
 		);
 	});
@@ -253,7 +256,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('せんせい', 0, 4, null, null),
 			'せんせい',
-			0, 4,
+			0, 4, true,
 			'せんせい', 4
 		);
 
@@ -263,7 +266,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('せんせい', 0, 4, null, null),
 			'先生',
-			0, 2,
+			0, 2, true,
 			'先生', 4
 		);
 
@@ -273,7 +276,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('先生', 0, 2, null, null),
 			'先生',
-			2, 2,
+			2, 2, true,
 			'', 0
 		);
 	});
@@ -282,7 +285,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			null,
 			'a',
-			0, 1,
+			0, 1, true,
 			'a', 0
 		);
 	});
@@ -291,7 +294,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState(']\n', 1, 2, null, null),
 			']\n',
-			2, 2,
+			2, 2, true,
 			'\n', 0
 		);
 	});
@@ -300,7 +303,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			null,
 			'a',
-			1, 1,
+			1, 1, true,
 			'a', 0
 		);
 	});
@@ -309,7 +312,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			TextAreaState.EMPTY,
 			'a',
-			0, 1,
+			0, 1, true,
 			'a', 0
 		);
 	});
@@ -318,7 +321,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			TextAreaState.EMPTY,
 			'a',
-			1, 1,
+			1, 1, true,
 			'a', 0
 		);
 	});
@@ -327,7 +330,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('Hello world!', 0, 12, null, null),
 			'H',
-			1, 1,
+			1, 1, true,
 			'H', 0
 		);
 	});
@@ -336,7 +339,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('Hello world!', 12, 12, null, null),
 			'Hello world!a',
-			13, 13,
+			13, 13, true,
 			'a', 0
 		);
 	});
@@ -345,7 +348,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('Hello world!', 0, 0, null, null),
 			'aHello world!',
-			1, 1,
+			1, 1, true,
 			'a', 0
 		);
 	});
@@ -354,7 +357,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('Hello world!', 6, 11, null, null),
 			'Hello other!',
-			11, 11,
+			11, 11, true,
 			'other', 0
 		);
 	});
@@ -363,7 +366,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			TextAreaState.EMPTY,
 			'これは',
-			3, 3,
+			3, 3, true,
 			'これは', 0
 		);
 	});
@@ -372,7 +375,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('Hello world!', 0, 0, null, null),
 			'Aello world!',
-			1, 1,
+			1, 1, true,
 			'A', 0
 		);
 	});
@@ -381,7 +384,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('Hello world!', 5, 5, null, null),
 			'Hellö world!',
-			4, 5,
+			4, 5, true,
 			'ö', 0
 		);
 	});
@@ -390,7 +393,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('Hello world!', 5, 5, null, null),
 			'Hellöö world!',
-			5, 5,
+			5, 5, true,
 			'öö', 1
 		);
 	});
@@ -399,7 +402,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('Hello world!', 5, 5, null, null),
 			'Helöö world!',
-			5, 5,
+			5, 5, true,
 			'öö', 2
 		);
 	});
@@ -408,7 +411,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('Hello world!', 5, 5, null, null),
 			'Hellö world!',
-			5, 5,
+			5, 5, true,
 			'ö', 1
 		);
 	});
@@ -417,7 +420,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('a', 0, 1, null, null),
 			'a',
-			1, 1,
+			1, 1, true,
 			'a', 0
 		);
 	});
@@ -426,7 +429,7 @@ suite('TextAreaState', () => {
 		testDeduceInput(
 			new TextAreaState('x x', 0, 1, null, null),
 			'x x',
-			1, 1,
+			1, 1, true,
 			'x', 0
 		);
 	});
@@ -456,7 +459,7 @@ suite('TextAreaState', () => {
 				'some6  text',
 				'some7  text'
 			].join('\n'),
-			4, 4,
+			4, 4, true,
 			'📅', 0
 		);
 	});
@@ -470,7 +473,7 @@ suite('TextAreaState', () => {
 				null, null
 			),
 			'some💊1  text',
-			6, 6,
+			6, 6, true,
 			'💊', 0
 		);
 	});
@@ -484,7 +487,7 @@ suite('TextAreaState', () => {
 				null, null
 			),
 			'qwertyu\nasdfghj\nzxcvbnm🎈',
-			25, 25,
+			25, 25, true,
 			'🎈', 0
 		);
 	});
@@ -499,16 +502,92 @@ suite('TextAreaState', () => {
 				null, null
 			),
 			'some⌨️1  text',
-			6, 6,
+			6, 6, true,
 			'⌨️', 0
+		);
+	});
+
+	function testDeduceAndroidCompositionInput(
+		prevState: TextAreaState | null,
+		value: string, selectionStart: number, selectionEnd: number,
+		expected: string, expectedReplacePrevCharCnt: number, expectedReplaceNextCharCnt: number, expectedPositionDelta: number): void {
+		prevState = prevState || TextAreaState.EMPTY;
+
+		let textArea = new MockTextAreaWrapper();
+		textArea._value = value;
+		textArea._selectionStart = selectionStart;
+		textArea._selectionEnd = selectionEnd;
+
+		let newState = TextAreaState.readFromTextArea(textArea);
+		let actual = TextAreaState.deduceAndroidCompositionInput(prevState, newState);
+
+		assert.deepStrictEqual(actual, {
+			text: expected,
+			replacePrevCharCnt: expectedReplacePrevCharCnt,
+			replaceNextCharCnt: expectedReplaceNextCharCnt,
+			positionDelta: expectedPositionDelta,
+		});
+
+		textArea.dispose();
+	}
+
+	test('Android composition input 1', () => {
+		testDeduceAndroidCompositionInput(
+			new TextAreaState(
+				'Microsoft',
+				4, 4,
+				null, null
+			),
+			'Microsoft',
+			4, 4,
+			'', 0, 0, 0,
+		);
+	});
+
+	test('Android composition input 2', () => {
+		testDeduceAndroidCompositionInput(
+			new TextAreaState(
+				'Microsoft',
+				4, 4,
+				null, null
+			),
+			'Microsoft',
+			0, 9,
+			'', 0, 0, 5,
+		);
+	});
+
+	test('Android composition input 3', () => {
+		testDeduceAndroidCompositionInput(
+			new TextAreaState(
+				'Microsoft',
+				0, 9,
+				null, null
+			),
+			'Microsoft\'s',
+			11, 11,
+			'\'s', 0, 0, 0,
+		);
+	});
+
+	test('Android backspace', () => {
+		testDeduceAndroidCompositionInput(
+			new TextAreaState(
+				'undefinedVariable',
+				2, 2,
+				null, null
+			),
+			'udefinedVariable',
+			1, 1,
+			'', 1, 0, 0,
 		);
 	});
 
 	suite('PagedScreenReaderStrategy', () => {
 
 		function testPagedScreenReaderStrategy(lines: string[], selection: Selection, expected: TextAreaState): void {
-			const model = TextModel.createFromString(lines.join('\n'));
-			const actual = PagedScreenReaderStrategy.fromEditorSelection(TextAreaState.EMPTY, model, selection, true);
+			const model = createTextModel(lines.join('\n'));
+			const actual = PagedScreenReaderStrategy.fromEditorSelection(TextAreaState.EMPTY, model, selection, 10, true);
 			assert.ok(equalsTextAreaState(actual, expected));
 			model.dispose();
 		}
