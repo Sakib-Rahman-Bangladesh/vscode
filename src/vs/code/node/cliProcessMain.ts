@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { release } from 'os';
+import { release, hostname } from 'os';
 import * as fs from 'fs';
 import { gracefulify } from 'graceful-fs';
 import { isAbsolute, join } from 'vs/base/common/path';
@@ -19,7 +19,7 @@ import { NativeEnvironmentService } from 'vs/platform/environment/node/environme
 import { IExtensionManagementService, IExtensionGalleryService, IExtensionManagementCLIService } from 'vs/platform/extensionManagement/common/extensionManagement';
 import { ExtensionManagementService } from 'vs/platform/extensionManagement/node/extensionManagementService';
 import { ExtensionGalleryService } from 'vs/platform/extensionManagement/common/extensionGalleryService';
-import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
+import { ITelemetryService, machineIdKey } from 'vs/platform/telemetry/common/telemetry';
 import { combinedAppender, NullTelemetryService } from 'vs/platform/telemetry/common/telemetryUtils';
 import { TelemetryService, ITelemetryServiceConfig } from 'vs/platform/telemetry/common/telemetryService';
 import { resolveCommonProperties } from 'vs/platform/telemetry/common/commonProperties';
@@ -28,8 +28,6 @@ import { RequestService } from 'vs/platform/request/node/requestService';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { ConfigurationService } from 'vs/platform/configuration/common/configurationService';
 import { AppInsightsAppender } from 'vs/platform/telemetry/node/appInsightsAppender';
-import { IStateService } from 'vs/platform/state/node/state';
-import { StateService } from 'vs/platform/state/node/stateService';
 import { ILogService, getLogLevel, LogLevel, ConsoleLogger, MultiplexLogService, ILogger } from 'vs/platform/log/common/log';
 import { Schemas } from 'vs/base/common/network';
 import { SpdLogLogger } from 'vs/platform/log/node/spdlogLog';
@@ -131,12 +129,6 @@ class CliMain extends Disposable {
 		// Init config
 		await configurationService.initialize();
 
-		// State
-		const stateService = new StateService(environmentService, logService);
-		services.set(IStateService, stateService);
-
-		const { appRoot, extensionsPath, extensionDevelopmentLocationURI, isBuilt, installSourcePath } = environmentService;
-
 		// Request
 		services.set(IRequestService, new SyncDescriptor(RequestService));
 
@@ -150,15 +142,29 @@ class CliMain extends Disposable {
 
 		// Telemetry
 		const appenders: AppInsightsAppender[] = [];
-		if (isBuilt && !extensionDevelopmentLocationURI && !environmentService.disableTelemetry && productService.enableTelemetry) {
+		if (environmentService.isBuilt && !environmentService.isExtensionDevelopment && !environmentService.disableTelemetry && productService.enableTelemetry) {
 			if (productService.aiConfig && productService.aiConfig.asimovKey) {
 				appenders.push(new AppInsightsAppender('monacoworkbench', null, productService.aiConfig.asimovKey));
 			}
 
+			const { appRoot, extensionsPath, installSourcePath } = environmentService;
+
 			const config: ITelemetryServiceConfig = {
 				appender: combinedAppender(...appenders),
 				sendErrorTelemetry: false,
-				commonProperties: resolveCommonProperties(fileService, release(), process.arch, productService.commit, productService.version, stateService.getItem('telemetry.machineId'), productService.msftInternalDomains, installSourcePath),
+				commonProperties: (async () => {
+					let machineId: string | undefined = undefined;
+					try {
+						const storageContents = await fs.promises.readFile(join(environmentService.userDataPath, 'storage.json'));
+						machineId = JSON.parse(storageContents.toString())[machineIdKey];
+					} catch (error) {
+						if (error.code !== 'ENOENT') {
+							logService.error(error);
+						}
+					}
+
+					return resolveCommonProperties(fileService, release(), hostname(), process.arch, productService.commit, productService.version, machineId, productService.msftInternalDomains, installSourcePath);
+				})(),
 				piiPaths: [appRoot, extensionsPath]
 			};
 

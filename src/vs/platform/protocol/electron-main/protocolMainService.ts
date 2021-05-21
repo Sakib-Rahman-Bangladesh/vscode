@@ -47,10 +47,10 @@ export class ProtocolMainService extends Disposable implements IProtocolMainServ
 		const { defaultSession } = session;
 
 		// Register vscode-file:// handler
-		defaultSession.protocol.registerFileProtocol(Schemas.vscodeFileResource, (request, callback) => this.handleResourceRequest(request, callback as unknown as ProtocolCallback));
+		defaultSession.protocol.registerFileProtocol(Schemas.vscodeFileResource, (request, callback) => this.handleResourceRequest(request, callback));
 
 		// Intercept any file:// access
-		defaultSession.protocol.interceptFileProtocol(Schemas.file, (request, callback) => this.handleFileRequest(request, callback as unknown as ProtocolCallback));
+		defaultSession.protocol.interceptFileProtocol(Schemas.file, (request, callback) => this.handleFileRequest(request, callback));
 
 		// Cleanup
 		this._register(toDisposable(() => {
@@ -142,7 +142,8 @@ export class ProtocolMainService extends Disposable implements IProtocolMainServ
 
 	//#region IPC Object URLs
 
-	createIPCObjectUrl<T>(obj: T): IIPCObjectUrl<T> {
+	createIPCObjectUrl<T>(): IIPCObjectUrl<T> {
+		let obj: T | undefined = undefined;
 
 		// Create unique URI
 		const resource = URI.from({
@@ -152,7 +153,7 @@ export class ProtocolMainService extends Disposable implements IProtocolMainServ
 
 		// Install IPC handler
 		const channel = resource.toString();
-		const handler = async (): Promise<T> => obj;
+		const handler = async (): Promise<T | undefined> => obj;
 		ipcMain.handle(channel, handler);
 
 		this.logService.trace(`IPC Object URL: Registered new channel ${channel}.`);

@@ -4,15 +4,15 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { addDisposableListener } from 'vs/base/browser/dom';
-import { ThrottledDelayer } from 'vs/base/common/async';
 import { IDisposable } from 'vs/base/common/lifecycle';
+import { IMenuService } from 'vs/platform/actions/common/actions';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
+import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
 import { IFileService } from 'vs/platform/files/common/files';
 import { ILogService } from 'vs/platform/log/common/log';
 import { INotificationService } from 'vs/platform/notification/common/notification';
 import { IRemoteAuthorityResolverService } from 'vs/platform/remote/common/remoteAuthorityResolver';
 import { ITunnelService } from 'vs/platform/remote/common/tunnel';
-import { IRequestService } from 'vs/platform/request/common/request';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { BaseWebview, WebviewMessageChannels } from 'vs/workbench/contrib/webview/browser/baseWebviewElement';
 import { WebviewThemeDataProvider } from 'vs/workbench/contrib/webview/browser/themeing';
@@ -23,34 +23,33 @@ export class IFrameWebview extends BaseWebview<HTMLIFrameElement> implements Web
 
 	private _confirmBeforeClose: string;
 
-	private readonly _focusDelayer = this._register(new ThrottledDelayer(10));
-	private _elementFocusImpl!: (options?: FocusOptions | undefined) => void;
-
 	constructor(
 		id: string,
 		options: WebviewOptions,
 		contentOptions: WebviewContentOptions,
 		extension: WebviewExtensionDescription | undefined,
 		webviewThemeDataProvider: WebviewThemeDataProvider,
+		@IContextMenuService contextMenuService: IContextMenuService,
 		@IConfigurationService configurationService: IConfigurationService,
 		@IFileService fileService: IFileService,
 		@ILogService logService: ILogService,
+		@IMenuService menuService: IMenuService,
 		@INotificationService notificationService: INotificationService,
 		@IRemoteAuthorityResolverService remoteAuthorityResolverService: IRemoteAuthorityResolverService,
-		@IRequestService requestService: IRequestService,
 		@ITelemetryService telemetryService: ITelemetryService,
 		@ITunnelService tunnelService: ITunnelService,
 		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService,
 	) {
 		super(id, options, contentOptions, extension, webviewThemeDataProvider, {
+			contextMenuService,
 			notificationService,
 			logService,
 			telemetryService,
 			environmentService,
-			requestService,
 			fileService,
 			tunnelService,
-			remoteAuthorityResolverService
+			remoteAuthorityResolverService,
+			menuService,
 		});
 
 		/* __GDPR__
@@ -87,7 +86,6 @@ export class IFrameWebview extends BaseWebview<HTMLIFrameElement> implements Web
 		element.style.width = '100%';
 		element.style.height = '100%';
 
-		this._elementFocusImpl = () => element.contentWindow?.focus();
 		element.focus = () => {
 			this.doFocus();
 		};
@@ -95,12 +93,18 @@ export class IFrameWebview extends BaseWebview<HTMLIFrameElement> implements Web
 		return element;
 	}
 
+	protected elementFocusImpl() {
+		this.element?.contentWindow?.focus();
+	}
+
 	protected initElement(extension: WebviewExtensionDescription | undefined, options: WebviewOptions, extraParams?: object) {
 		const params = {
 			id: this.id,
 			extensionId: extension?.id.value ?? '', // The extensionId and purpose in the URL are used for filtering in js-debug:
 			purpose: options.purpose,
-			...extraParams
+			serviceWorkerFetchIgnoreSubdomain: options.serviceWorkerFetchIgnoreSubdomain,
+			...extraParams,
+			'vscode-resource-origin': this.webviewResourceOrigin,
 		} as const;
 
 		const queryString = (Object.keys(params) as Array<keyof typeof params>)
@@ -118,39 +122,14 @@ export class IFrameWebview extends BaseWebview<HTMLIFrameElement> implements Web
 		return endpoint;
 	}
 
-	protected get webviewResourceEndpoint(): string {
-		return this.webviewContentEndpoint;
-	}
-
 	public mountTo(parent: HTMLElement) {
 		if (this.element) {
 			parent.appendChild(this.element);
 		}
 	}
 
-	public override set html(value: string) {
-		super.html = this.preprocessHtml(value);
-	}
-
-	protected preprocessHtml(value: string): string {
-		return value
-			.replace(/(["'])(?:vscode-resource):(\/\/([^\s\/'"]+?)(?=\/))?([^\s'"]+?)(["'])/gi, (match, startQuote, _1, scheme, path, endQuote) => {
-				if (scheme) {
-					return `${startQuote}${this.webviewResourceEndpoint}/vscode-resource/${scheme}${path}${endQuote}`;
-				}
-				return `${startQuote}${this.webviewResourceEndpoint}/vscode-resource/file${path}${endQuote}`;
-			})
-			.replace(/(["'])(?:vscode-webview-resource):(\/\/[^\s\/'"]+\/([^\s\/'"]+?)(?=\/))?([^\s'"]+?)(["'])/gi, (match, startQuote, _1, scheme, path, endQuote) => {
-				if (scheme) {
-					return `${startQuote}${this.webviewResourceEndpoint}/vscode-resource/${scheme}${path}${endQuote}`;
-				}
-				return `${startQuote}${this.webviewResourceEndpoint}/vscode-resource/file${path}${endQuote}`;
-			});
-	}
-
 	protected get extraContentOptions(): any {
 		return {
-			endpoint: this.webviewContentEndpoint,
 			confirmBeforeClose: this._confirmBeforeClose,
 		};
 	}
@@ -181,53 +160,6 @@ export class IFrameWebview extends BaseWebview<HTMLIFrameElement> implements Web
 			if (e.data.channel === channel) {
 				handler(e.data.data);
 			}
-		});
-	}
-
-	public focus(): void {
-		this.doFocus();
-
-		// Handle focus change programmatically (do not rely on event from <webview>)
-		this.handleFocusChange(true);
-	}
-
-	private doFocus() {
-		if (!this.element) {
-			return;
-		}
-
-		// Clear the existing focus first if not already on the webview.
-		// This is required because the next part where we set the focus is async.
-		if (document.activeElement && document.activeElement instanceof HTMLElement && document.activeElement !== this.element) {
-			// Don't blur if on the webview because this will also happen async and may unset the focus
-			// after the focus trigger fires below.
-			document.activeElement.blur();
-		}
-
-		// Workaround for https://github.com/microsoft/vscode/issues/75209
-		// Electron's webview.focus is async so for a sequence of actions such as:
-		//
-		// 1. Open webview
-		// 1. Show quick pick from command palette
-		//
-		// We end up focusing the webview after showing the quick pick, which causes
-		// the quick pick to instantly dismiss.
-		//
-		// Workaround this by debouncing the focus and making sure we are not focused on an input
-		// when we try to re-focus.
-		this._focusDelayer.trigger(async () => {
-			if (!this.isFocused || !this.element) {
-				return;
-			}
-			if (document.activeElement && document.activeElement?.tagName !== 'BODY') {
-				return;
-			}
-			try {
-				this._elementFocusImpl();
-			} catch {
-				// noop
-			}
-			this._send('focus');
 		});
 	}
 }

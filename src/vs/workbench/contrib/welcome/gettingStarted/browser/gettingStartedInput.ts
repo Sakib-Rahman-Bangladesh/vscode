@@ -12,14 +12,15 @@ import { Schemas } from 'vs/base/common/network';
 export const gettingStartedInputTypeId = 'workbench.editors.gettingStartedInput';
 
 export class GettingStartedInput extends EditorInput {
+
 	static readonly ID = gettingStartedInputTypeId;
+
+	override get typeId(): string {
+		return GettingStartedInput.ID;
+	}
 
 	get resource(): URI | undefined {
 		return URI.from({ scheme: Schemas.walkThrough, authority: 'vscode_getting_started_page' });
-	}
-
-	getTypeId(): string {
-		return GettingStartedInput.ID;
 	}
 
 	override matches(other: unknown) {
@@ -30,11 +31,11 @@ export class GettingStartedInput extends EditorInput {
 	}
 
 	constructor(
-		options: { selectedCategory?: string, selectedTask?: string }
+		options: { selectedCategory?: string, selectedStep?: string }
 	) {
 		super();
 		this.selectedCategory = options.selectedCategory;
-		this.selectedTask = options.selectedTask;
+		this.selectedStep = options.selectedStep;
 	}
 
 	override getName() {
@@ -42,5 +43,5 @@ export class GettingStartedInput extends EditorInput {
 	}
 
 	selectedCategory: string | undefined;
-	selectedTask: string | undefined;
+	selectedStep: string | undefined;
 }

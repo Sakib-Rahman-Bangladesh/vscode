@@ -139,6 +139,12 @@ const apiMenus: IAPIMenu[] = [
 		supportsSubmenus: false
 	},
 	{
+		key: 'statusBar/remoteIndicator',
+		id: MenuId.StatusBarRemoteIndicatorMenu,
+		description: localize('menus.statusBarRemoteIndicator', "The remote indicator menu in the status bar"),
+		supportsSubmenus: false
+	},
+	{
 		key: 'view/title',
 		id: MenuId.ViewTitle,
 		description: localize('view.viewTitle', "The contributed view title menu")
@@ -177,6 +183,12 @@ const apiMenus: IAPIMenu[] = [
 		proposed: true
 	},
 	{
+		key: 'notebook/toolbar/right',
+		id: MenuId.NotebookRightToolbar,
+		description: localize('notebook.toolbar.right', "The contributed notebook right toolbar menu"),
+		proposed: true
+	},
+	{
 		key: 'notebook/cell/title',
 		id: MenuId.NotebookCellTitle,
 		description: localize('notebook.cell.title', "The contributed notebook cell title menu"),
@@ -212,6 +224,11 @@ const apiMenus: IAPIMenu[] = [
 		key: 'ports/item/origin/inline',
 		id: MenuId.TunnelOriginInline,
 		description: localize('view.tunnelOriginInline', "The Ports view item origin inline menu")
+	},
+	{
+		key: 'ports/item/port/inline',
+		id: MenuId.TunnelPortInline,
+		description: localize('view.tunnelPortInline', "The Ports view item port inline menu")
 	}
 ];
 

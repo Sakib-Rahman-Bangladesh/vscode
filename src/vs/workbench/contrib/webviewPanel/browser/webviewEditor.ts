@@ -121,7 +121,7 @@ export class WebviewEditor extends EditorPane {
 		super.clearInput();
 	}
 
-	public async override setInput(input: EditorInput, options: EditorOptions, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
+	public override async setInput(input: EditorInput, options: EditorOptions, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
 		if (input.matches(this.input)) {
 			return;
 		}
@@ -164,7 +164,7 @@ export class WebviewEditor extends EditorPane {
 
 		// Webviews are not part of the normal editor dom, so we have to register our own drag and drop handler on them.
 		this._webviewVisibleDisposables.add(this._editorDropService.createEditorDropTarget(input.webview.container, {
-			containsGroup: (group) => this.group?.id === group.group.id
+			containsGroup: (group) => this.group?.id === group.id
 		}));
 
 		this._webviewVisibleDisposables.add(new WebviewWindowDragMonitor(() => this.webview));

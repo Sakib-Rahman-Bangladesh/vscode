@@ -10,7 +10,8 @@ import { Event } from 'vs/base/common/event';
 import { isObject, assertIsDefined, withNullAsUndefined, isFunction } from 'vs/base/common/types';
 import { Dimension } from 'vs/base/browser/dom';
 import { CodeEditorWidget } from 'vs/editor/browser/widget/codeEditorWidget';
-import { EditorInput, EditorOptions, IEditorMemento, ITextEditorPane, TextEditorOptions, IEditorCloseEvent, IEditorInput, computeEditorAriaLabel, IEditorOpenContext, EditorResourceAccessor, SideBySideEditor } from 'vs/workbench/common/editor';
+import { EditorInput, EditorOptions, IEditorMemento, ITextEditorPane, TextEditorOptions, IEditorCloseEvent, IEditorInput, IEditorOpenContext, EditorResourceAccessor, SideBySideEditor } from 'vs/workbench/common/editor';
+import { computeEditorAriaLabel } from 'vs/workbench/browser/editor';
 import { EditorPane } from 'vs/workbench/browser/parts/editor/editorPane';
 import { IEditorViewState, IEditor, ScrollType } from 'vs/editor/common/editorCommon';
 import { IStorageService } from 'vs/platform/storage/common/storage';
@@ -48,10 +49,6 @@ export abstract class BaseTextEditor extends EditorPane implements ITextEditorPa
 
 	private readonly groupListener = this._register(new MutableDisposable());
 
-	private _instantiationService: IInstantiationService;
-	protected get instantiationService(): IInstantiationService { return this._instantiationService; }
-	protected set instantiationService(value: IInstantiationService) { this._instantiationService = value; }
-
 	override get scopedContextKeyService(): IContextKeyService | undefined {
 		return isCodeEditor(this.editorControl) ? this.editorControl.invokeWithinContext(accessor => accessor.get(IContextKeyService)) : undefined;
 	}
@@ -59,7 +56,7 @@ export abstract class BaseTextEditor extends EditorPane implements ITextEditorPa
 	constructor(
 		id: string,
 		@ITelemetryService telemetryService: ITelemetryService,
-		@IInstantiationService instantiationService: IInstantiationService,
+		@IInstantiationService protected instantiationService: IInstantiationService,
 		@IStorageService storageService: IStorageService,
 		@ITextResourceConfigurationService protected readonly textResourceConfigurationService: ITextResourceConfigurationService,
 		@IThemeService themeService: IThemeService,
@@ -67,8 +64,6 @@ export abstract class BaseTextEditor extends EditorPane implements ITextEditorPa
 		@IEditorGroupsService protected editorGroupService: IEditorGroupsService
 	) {
 		super(id, telemetryService, themeService, storageService);
-
-		this._instantiationService = instantiationService;
 
 		this.editorMemento = this.getEditorMemento<IEditorViewState>(editorGroupService, BaseTextEditor.TEXT_EDITOR_VIEW_STATE_PREFERENCE_KEY, 100);
 
@@ -158,7 +153,7 @@ export abstract class BaseTextEditor extends EditorPane implements ITextEditorPa
 		return this.instantiationService.createInstance(CodeEditorWidget, parent, configuration, {});
 	}
 
-	async override setInput(input: EditorInput, options: EditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
+	override async setInput(input: EditorInput, options: EditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
 		await super.setInput(input, options, context, token);
 
 		// Update editor options after having set the input. We do this because there can be

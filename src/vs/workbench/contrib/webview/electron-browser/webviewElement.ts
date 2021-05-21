@@ -5,12 +5,13 @@
 
 import { FindInPageOptions, WebviewTag } from 'electron';
 import { addDisposableListener } from 'vs/base/browser/dom';
-import { ThrottledDelayer } from 'vs/base/common/async';
 import { Emitter, Event } from 'vs/base/common/event';
 import { once } from 'vs/base/common/functional';
 import { IDisposable } from 'vs/base/common/lifecycle';
 import { FileAccess, Schemas } from 'vs/base/common/network';
+import { IMenuService } from 'vs/platform/actions/common/actions';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
+import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
 import { IFileService } from 'vs/platform/files/common/files';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IMainProcessService } from 'vs/platform/ipc/electron-sandbox/services';
@@ -18,15 +19,13 @@ import { ILogService } from 'vs/platform/log/common/log';
 import { INotificationService } from 'vs/platform/notification/common/notification';
 import { IRemoteAuthorityResolverService } from 'vs/platform/remote/common/remoteAuthorityResolver';
 import { ITunnelService } from 'vs/platform/remote/common/tunnel';
-import { IRequestService } from 'vs/platform/request/common/request';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
-import { webviewPartitionId } from 'vs/platform/webview/common/resourceLoader';
+import { webviewPartitionId } from 'vs/platform/webview/common/webviewManagerService';
 import { BaseWebview, WebviewMessageChannels } from 'vs/workbench/contrib/webview/browser/baseWebviewElement';
 import { WebviewThemeDataProvider } from 'vs/workbench/contrib/webview/browser/themeing';
 import { Webview, WebviewContentOptions, WebviewExtensionDescription, WebviewOptions } from 'vs/workbench/contrib/webview/browser/webview';
 import { WebviewFindDelegate, WebviewFindWidget } from 'vs/workbench/contrib/webview/browser/webviewFindWidget';
 import { WebviewIgnoreMenuShortcutsManager } from 'vs/workbench/contrib/webview/electron-browser/webviewIgnoreMenuShortcutsManager';
-import { rewriteVsCodeResourceUrls } from 'vs/workbench/contrib/webview/electron-sandbox/resourceLoading';
 import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
 
 export class ElectronWebviewBasedWebview extends BaseWebview<WebviewTag> implements Webview, WebviewFindDelegate {
@@ -46,34 +45,33 @@ export class ElectronWebviewBasedWebview extends BaseWebview<WebviewTag> impleme
 	private _webviewFindWidget: WebviewFindWidget | undefined;
 	private _findStarted: boolean = false;
 
-	private readonly _focusDelayer = this._register(new ThrottledDelayer(10));
-	private _elementFocusImpl!: (options?: FocusOptions | undefined) => void;
-
 	constructor(
 		id: string,
 		options: WebviewOptions,
 		contentOptions: WebviewContentOptions,
 		extension: WebviewExtensionDescription | undefined,
 		private readonly _webviewThemeDataProvider: WebviewThemeDataProvider,
+		@IContextMenuService contextMenuService: IContextMenuService,
 		@ILogService private readonly _myLogService: ILogService,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@ITelemetryService telemetryService: ITelemetryService,
 		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService,
 		@IConfigurationService configurationService: IConfigurationService,
 		@IMainProcessService mainProcessService: IMainProcessService,
+		@IMenuService menuService: IMenuService,
 		@INotificationService notificationService: INotificationService,
 		@IFileService fileService: IFileService,
-		@IRequestService requestService: IRequestService,
 		@ITunnelService tunnelService: ITunnelService,
 		@IRemoteAuthorityResolverService remoteAuthorityResolverService: IRemoteAuthorityResolverService,
 	) {
 		super(id, options, contentOptions, extension, _webviewThemeDataProvider, {
+			contextMenuService,
 			notificationService,
 			logService: _myLogService,
 			telemetryService,
 			environmentService,
 			fileService,
-			requestService,
+			menuService,
 			tunnelService,
 			remoteAuthorityResolverService
 		});
@@ -161,7 +159,7 @@ export class ElectronWebviewBasedWebview extends BaseWebview<WebviewTag> impleme
 		// and not the `vscode-file` URI because preload scripts are loaded
 		// via node.js from the main side and only allow `file:` protocol
 		this.element!.preload = FileAccess.asFileUri('./pre/electron-index.js', require).toString(true);
-		this.element!.src = `${Schemas.vscodeWebview}://${this.id}/electron-browser-index.html?platform=electron&id=${this.id}&vscode-resource-origin=${encodeURIComponent(this.webviewResourceEndpoint)}`;
+		this.element!.src = `${Schemas.vscodeWebview}://${this.id}/electron-browser-index.html?platform=electron&id=${this.id}&vscode-resource-origin=${encodeURIComponent(this.webviewResourceOrigin)}`;
 	}
 
 	protected createElement(options: WebviewOptions) {
@@ -169,7 +167,6 @@ export class ElectronWebviewBasedWebview extends BaseWebview<WebviewTag> impleme
 		// Wait the end of the ctor when all listeners have been hooked up.
 		const element = document.createElement('webview');
 
-		this._elementFocusImpl = element.focus.bind(element);
 		element.focus = () => {
 			this.doFocus();
 		};
@@ -186,22 +183,16 @@ export class ElectronWebviewBasedWebview extends BaseWebview<WebviewTag> impleme
 		return element;
 	}
 
+	protected elementFocusImpl() {
+		this.element?.focus();
+	}
+
 	public override set contentOptions(options: WebviewContentOptions) {
 		this._myLogService.debug(`Webview(${this.id}): will set content options`);
 		super.contentOptions = options;
 	}
 
-	private get webviewResourceEndpoint(): string {
-		return `https://${this.id}.vscode-webview-test.com`;
-	}
-
 	protected readonly extraContentOptions = {};
-
-	public override  set html(value: string) {
-		this._myLogService.debug(`Webview(${this.id}): will set html`);
-
-		super.html = rewriteVsCodeResourceUrls(this.id, value);
-	}
 
 	public mountTo(parent: HTMLElement) {
 		if (!this.element) {
@@ -217,53 +208,6 @@ export class ElectronWebviewBasedWebview extends BaseWebview<WebviewTag> impleme
 	protected async doPostMessage(channel: string, data?: any): Promise<void> {
 		this._myLogService.debug(`Webview(${this.id}): did post message on '${channel}'`);
 		this.element?.send(channel, data);
-	}
-
-	public focus(): void {
-		this.doFocus();
-
-		// Handle focus change programmatically (do not rely on event from <webview>)
-		this.handleFocusChange(true);
-	}
-
-	private doFocus() {
-		if (!this.element) {
-			return;
-		}
-
-		// Clear the existing focus first if not already on the webview.
-		// This is required because the next part where we set the focus is async.
-		if (document.activeElement && document.activeElement instanceof HTMLElement && document.activeElement !== this.element) {
-			// Don't blur if on the webview because this will also happen async and may unset the focus
-			// after the focus trigger fires below.
-			document.activeElement.blur();
-		}
-
-		// Workaround for https://github.com/microsoft/vscode/issues/75209
-		// Electron's webview.focus is async so for a sequence of actions such as:
-		//
-		// 1. Open webview
-		// 1. Show quick pick from command palette
-		//
-		// We end up focusing the webview after showing the quick pick, which causes
-		// the quick pick to instantly dismiss.
-		//
-		// Workaround this by debouncing the focus and making sure we are not focused on an input
-		// when we try to re-focus.
-		this._focusDelayer.trigger(async () => {
-			if (!this.isFocused || !this.element) {
-				return;
-			}
-			if (document.activeElement && document.activeElement?.tagName !== 'BODY') {
-				return;
-			}
-			try {
-				this._elementFocusImpl();
-			} catch {
-				// noop
-			}
-			this._send('focus');
-		});
 	}
 
 	protected override style(): void {
@@ -290,8 +234,7 @@ export class ElectronWebviewBasedWebview extends BaseWebview<WebviewTag> impleme
 		const findOptions: FindInPageOptions = {
 			forward: options.forward,
 			findNext: true,
-			matchCase: options.matchCase,
-			medialCapitalAsWordStart: options.medialCapitalAsWordStart
+			matchCase: options.matchCase
 		};
 
 		this._findStarted = true;

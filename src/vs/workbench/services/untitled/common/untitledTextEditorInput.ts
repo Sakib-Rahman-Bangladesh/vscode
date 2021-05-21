@@ -3,15 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IEncodingSupport, EncodingMode, Verbosity, IModeSupport } from 'vs/workbench/common/editor';
+import { Verbosity } from 'vs/workbench/common/editor';
 import { AbstractTextResourceEditorInput } from 'vs/workbench/common/editor/textResourceEditorInput';
 import { IUntitledTextEditorModel } from 'vs/workbench/services/untitled/common/untitledTextEditorModel';
-import { ITextFileService } from 'vs/workbench/services/textfile/common/textfiles';
+import { EncodingMode, IEncodingSupport, IModeSupport, ITextFileService } from 'vs/workbench/services/textfile/common/textfiles';
 import { ILabelService } from 'vs/platform/label/common/label';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
-import { IEditorGroupsService } from 'vs/workbench/services/editor/common/editorGroupsService';
 import { IFileService } from 'vs/platform/files/common/files';
-import { IFilesConfigurationService } from 'vs/workbench/services/filesConfiguration/common/filesConfigurationService';
 import { isEqual } from 'vs/base/common/resources';
 
 /**
@@ -21,6 +19,10 @@ export class UntitledTextEditorInput extends AbstractTextResourceEditorInput imp
 
 	static readonly ID: string = 'workbench.editors.untitledEditorInput';
 
+	override get typeId(): string {
+		return UntitledTextEditorInput.ID;
+	}
+
 	private modelResolve: Promise<void> | undefined = undefined;
 
 	constructor(
@@ -28,11 +30,9 @@ export class UntitledTextEditorInput extends AbstractTextResourceEditorInput imp
 		@ITextFileService textFileService: ITextFileService,
 		@ILabelService labelService: ILabelService,
 		@IEditorService editorService: IEditorService,
-		@IEditorGroupsService editorGroupService: IEditorGroupsService,
-		@IFileService fileService: IFileService,
-		@IFilesConfigurationService filesConfigurationService: IFilesConfigurationService
+		@IFileService fileService: IFileService
 	) {
-		super(model.resource, undefined, editorService, editorGroupService, textFileService, labelService, fileService, filesConfigurationService);
+		super(model.resource, undefined, editorService, textFileService, labelService, fileService);
 
 		this.registerModelListeners(model);
 	}
@@ -47,15 +47,11 @@ export class UntitledTextEditorInput extends AbstractTextResourceEditorInput imp
 		this._register(model.onDidRevert(() => this.dispose()));
 	}
 
-	getTypeId(): string {
-		return UntitledTextEditorInput.ID;
-	}
-
 	override getName(): string {
 		return this.model.name;
 	}
 
-	override getDescription(verbosity: Verbosity = Verbosity.MEDIUM): string | undefined {
+	override getDescription(verbosity = Verbosity.MEDIUM): string | undefined {
 
 		// Without associated path: only use if name and description differ
 		if (!this.model.hasAssociatedFilePath) {
@@ -97,8 +93,8 @@ export class UntitledTextEditorInput extends AbstractTextResourceEditorInput imp
 		return this.model.getEncoding();
 	}
 
-	setEncoding(encoding: string, mode: EncodingMode /* ignored, we only have Encode */): void {
-		this.model.setEncoding(encoding);
+	setEncoding(encoding: string, mode: EncodingMode /* ignored, we only have Encode */): Promise<void> {
+		return this.model.setEncoding(encoding);
 	}
 
 	setMode(mode: string): void {
@@ -109,7 +105,7 @@ export class UntitledTextEditorInput extends AbstractTextResourceEditorInput imp
 		return this.model.getMode();
 	}
 
-	async override resolve(): Promise<IUntitledTextEditorModel> {
+	override async resolve(): Promise<IUntitledTextEditorModel> {
 		if (!this.modelResolve) {
 			this.modelResolve = this.model.resolve();
 		}

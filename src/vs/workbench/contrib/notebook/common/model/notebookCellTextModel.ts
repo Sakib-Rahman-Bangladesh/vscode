@@ -4,27 +4,31 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Emitter, Event } from 'vs/base/common/event';
-import { ICell, NotebookCellOutputsSplice, CellKind, NotebookCellMetadata, NotebookDocumentMetadata, TransientOptions, IOutputDto, ICellOutput, CellMetadataChangedEvent } from 'vs/workbench/contrib/notebook/common/notebookCommon';
-import { PieceTreeTextBufferBuilder } from 'vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBufferBuilder';
+import { hash } from 'vs/base/common/hash';
+import { Disposable, DisposableStore } from 'vs/base/common/lifecycle';
 import { URI } from 'vs/base/common/uri';
 import * as UUID from 'vs/base/common/uuid';
-import * as model from 'vs/editor/common/model';
 import { Range } from 'vs/editor/common/core/range';
-import { Disposable, DisposableStore } from 'vs/base/common/lifecycle';
-import { hash } from 'vs/base/common/hash';
+import * as model from 'vs/editor/common/model';
 import { PieceTreeTextBuffer } from 'vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBuffer';
-import { NotebookCellOutputTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookCellOutputTextModel';
+import { PieceTreeTextBufferBuilder } from 'vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBufferBuilder';
+import { TextModel } from 'vs/editor/common/model/textModel';
 import { IModeService } from 'vs/editor/common/services/modeService';
+import { NotebookCellOutputTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookCellOutputTextModel';
+import { CellInternalMetadataChangedEvent, CellKind, ICell, ICellOutput, IOutputDto, NotebookCellInternalMetadata, NotebookCellMetadata, NotebookCellOutputsSplice, TransientOptions } from 'vs/workbench/contrib/notebook/common/notebookCommon';
 
 export class NotebookCellTextModel extends Disposable implements ICell {
 	private _onDidChangeOutputs = new Emitter<NotebookCellOutputsSplice[]>();
 	onDidChangeOutputs: Event<NotebookCellOutputsSplice[]> = this._onDidChangeOutputs.event;
 
-	private _onDidChangeContent = new Emitter<void>();
-	onDidChangeContent: Event<void> = this._onDidChangeContent.event;
+	private _onDidChangeContent = new Emitter<'content' | 'language'>();
+	onDidChangeContent: Event<'content' | 'language'> = this._onDidChangeContent.event;
 
-	private _onDidChangeMetadata = new Emitter<CellMetadataChangedEvent>();
-	onDidChangeMetadata: Event<CellMetadataChangedEvent> = this._onDidChangeMetadata.event;
+	private _onDidChangeMetadata = new Emitter<void>();
+	onDidChangeMetadata: Event<void> = this._onDidChangeMetadata.event;
+
+	private _onDidChangeInternalMetadata = new Emitter<CellInternalMetadataChangedEvent>();
+	onDidChangeInternalMetadata: Event<CellInternalMetadataChangedEvent> = this._onDidChangeInternalMetadata.event;
 
 	private _onDidChangeLanguage = new Emitter<string>();
 	onDidChangeLanguage: Event<string> = this._onDidChangeLanguage.event;
@@ -42,10 +46,26 @@ export class NotebookCellTextModel extends Disposable implements ICell {
 	}
 
 	set metadata(newMetadata: NotebookCellMetadata) {
-		const runStateChanged = this._metadata.runState !== newMetadata.runState;
 		this._metadata = newMetadata;
 		this._hash = null;
-		this._onDidChangeMetadata.fire({ runStateChanged });
+		this._onDidChangeMetadata.fire();
+	}
+
+	private _internalMetadata: NotebookCellInternalMetadata;
+
+	get internalMetadata() {
+		return this._internalMetadata;
+	}
+
+	set internalMetadata(newInternalMetadata: NotebookCellInternalMetadata) {
+		const runStateChanged = this._internalMetadata.runState !== newInternalMetadata.runState;
+		newInternalMetadata = {
+			...newInternalMetadata,
+			...{ runStartTimeAdjustment: computeRunStartTimeAdjustment(this._internalMetadata, newInternalMetadata) }
+		};
+		this._internalMetadata = newInternalMetadata;
+		this._hash = null;
+		this._onDidChangeInternalMetadata.fire({ runStateChanged });
 	}
 
 	get language() {
@@ -65,7 +85,7 @@ export class NotebookCellTextModel extends Disposable implements ICell {
 		this._language = newLanguage;
 		this._hash = null;
 		this._onDidChangeLanguage.fire(newLanguage);
-		this._onDidChangeContent.fire();
+		this._onDidChangeContent.fire('language');
 	}
 
 	private _textBuffer!: model.IReadonlyTextBuffer;
@@ -84,7 +104,9 @@ export class NotebookCellTextModel extends Disposable implements ICell {
 
 		this._register(this._textBuffer.onDidChangeContent(() => {
 			this._hash = null;
-			this._onDidChangeContent.fire();
+			if (!this._textModel) {
+				this._onDidChangeContent.fire('content');
+			}
 		}));
 
 		return this._textBuffer;
@@ -92,13 +114,19 @@ export class NotebookCellTextModel extends Disposable implements ICell {
 
 	private _hash: number | null = null;
 
+	private _versionId: number = 1;
+	private _alternativeId: number = 1;
+	get alternativeId(): number {
+		return this._alternativeId;
+	}
+
 	private _textModelDisposables = new DisposableStore();
-	private _textModel: model.ITextModel | undefined = undefined;
-	get textModel(): model.ITextModel | undefined {
+	private _textModel: TextModel | undefined = undefined;
+	get textModel(): TextModel | undefined {
 		return this._textModel;
 	}
 
-	set textModel(m: model.ITextModel | undefined) {
+	set textModel(m: TextModel | undefined) {
 		if (this._textModel === m) {
 			return;
 		}
@@ -114,6 +142,16 @@ export class NotebookCellTextModel extends Disposable implements ICell {
 				this.language = e.newLanguage;
 			}));
 			this._textModelDisposables.add(this._textModel.onWillDispose(() => this.textModel = undefined));
+			this._textModelDisposables.add(this._textModel.onDidChangeContent(() => {
+				if (this._textModel) {
+					this._versionId = this._textModel.getVersionId();
+					this._alternativeId = this._textModel.getAlternativeVersionId();
+				}
+				this._onDidChangeContent.fire('content');
+			}));
+
+			this._textModel._overwriteVersionId(this._versionId);
+			this._textModel._overwriteAlternativeVersionId(this._versionId);
 		}
 	}
 
@@ -125,12 +163,14 @@ export class NotebookCellTextModel extends Disposable implements ICell {
 		public cellKind: CellKind,
 		outputs: IOutputDto[],
 		metadata: NotebookCellMetadata | undefined,
+		internalMetadata: NotebookCellInternalMetadata | undefined,
 		public readonly transientOptions: TransientOptions,
 		private readonly _modeService: IModeService
 	) {
 		super();
 		this._outputs = outputs.map(op => new NotebookCellOutputTextModel(op));
-		this._metadata = metadata || {};
+		this._metadata = metadata ?? {};
+		this._internalMetadata = internalMetadata ?? {};
 	}
 
 	getValue(): string {
@@ -148,18 +188,20 @@ export class NotebookCellTextModel extends Disposable implements ICell {
 			return this._hash;
 		}
 
-		// TODO@rebornix, raw outputs
-		this._hash = hash([hash(this.language), hash(this.getValue()), this._getPersisentMetadata, this.transientOptions.transientOutputs ? [] : this._outputs]);
+		this._hash = hash([hash(this.language), hash(this.getValue()), this._getPersisentMetadata(), this.transientOptions.transientOutputs ? [] : this._outputs.map(op => ({
+			outputs: op.outputs,
+			metadata: op.metadata
+		}))]);
 		return this._hash;
 	}
 
 	private _getPersisentMetadata() {
 		let filteredMetadata: { [key: string]: any } = {};
-		const transientMetadata = this.transientOptions.transientMetadata;
+		const transientCellMetadata = this.transientOptions.transientCellMetadata;
 
 		const keys = new Set([...Object.keys(this.metadata)]);
 		for (let key of keys) {
-			if (!(transientMetadata[key as keyof NotebookCellMetadata])
+			if (!(transientCellMetadata[key as keyof NotebookCellMetadata])
 			) {
 				filteredMetadata[key] = this.metadata[key as keyof NotebookCellMetadata];
 			}
@@ -185,23 +227,6 @@ export class NotebookCellTextModel extends Disposable implements ICell {
 			this._onDidChangeOutputs.fire(splices);
 		}
 	}
-
-	getEvaluatedMetadata(documentMetadata: NotebookDocumentMetadata): NotebookCellMetadata {
-		const editable = this.metadata?.editable ??
-			documentMetadata.cellEditable;
-
-		const hasExecutionOrder = this.metadata?.hasExecutionOrder ??
-			documentMetadata.cellHasExecutionOrder;
-
-		return {
-			...(this.metadata || {}),
-			...{
-				editable,
-				hasExecutionOrder
-			}
-		};
-	}
-
 	override dispose() {
 		// Manually release reference to previous text buffer to avoid large leaks
 		// in case someone leaks a CellTextModel reference
@@ -210,17 +235,6 @@ export class NotebookCellTextModel extends Disposable implements ICell {
 		this._textBuffer = emptyDisposedTextBuffer;
 		super.dispose();
 	}
-}
-
-export function cloneMetadata(cell: NotebookCellTextModel) {
-	return {
-		editable: cell.metadata?.editable,
-		breakpointMargin: cell.metadata?.breakpointMargin,
-		hasExecutionOrder: cell.metadata?.hasExecutionOrder,
-		inputCollapsed: cell.metadata?.inputCollapsed,
-		outputCollapsed: cell.metadata?.outputCollapsed,
-		custom: cell.metadata?.custom
-	};
 }
 
 export function cloneNotebookCellTextModel(cell: NotebookCellTextModel) {
@@ -232,6 +246,16 @@ export function cloneNotebookCellTextModel(cell: NotebookCellTextModel) {
 			outputs: output.outputs,
 			/* paste should generate new outputId */ outputId: UUID.generateUuid()
 		})),
-		metadata: cloneMetadata(cell)
+		metadata: { ...cell.metadata },
+		internalMetadata: { ...cell.internalMetadata },
 	};
+}
+
+function computeRunStartTimeAdjustment(oldMetadata: NotebookCellInternalMetadata, newMetadata: NotebookCellInternalMetadata): number | undefined {
+	if (oldMetadata.runStartTime !== newMetadata.runStartTime && typeof newMetadata.runStartTime === 'number') {
+		const offset = Date.now() - newMetadata.runStartTime;
+		return offset < 0 ? Math.abs(offset) : 0;
+	} else {
+		return newMetadata.runStartTimeAdjustment;
+	}
 }

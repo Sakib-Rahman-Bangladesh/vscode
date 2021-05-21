@@ -21,13 +21,17 @@ import { withNullAsUndefined } from 'vs/base/common/types';
  */
 export class DiffEditorInput extends SideBySideEditorInput {
 
-	static readonly ID = 'workbench.editors.diffEditorInput';
+	static override readonly ID = 'workbench.editors.diffEditorInput';
+
+	override get typeId(): string {
+		return DiffEditorInput.ID;
+	}
 
 	private cachedModel: DiffEditorModel | undefined = undefined;
 
 	constructor(
-		protected name: string | undefined,
-		protected description: string | undefined,
+		name: string | undefined,
+		description: string | undefined,
 		public readonly originalInput: EditorInput,
 		public readonly modifiedInput: EditorInput,
 		private readonly forceOpenAsBinary: boolean | undefined,
@@ -35,10 +39,6 @@ export class DiffEditorInput extends SideBySideEditorInput {
 		@IFileService private readonly fileService: IFileService
 	) {
 		super(name, description, originalInput, modifiedInput);
-	}
-
-	override getTypeId(): string {
-		return DiffEditorInput.ID;
 	}
 
 	override getName(): string {
@@ -58,7 +58,7 @@ export class DiffEditorInput extends SideBySideEditorInput {
 		return this.name;
 	}
 
-	override getDescription(verbosity: Verbosity = Verbosity.MEDIUM): string | undefined {
+	override getDescription(verbosity = Verbosity.MEDIUM): string | undefined {
 		if (typeof this.description !== 'string') {
 
 			// Pass the description of the modified side in case both original
@@ -88,7 +88,7 @@ export class DiffEditorInput extends SideBySideEditorInput {
 		return undefined;
 	}
 
-	async override resolve(): Promise<EditorModel> {
+	override async resolve(): Promise<EditorModel> {
 
 		// Create Model - we never reuse our cached model if refresh is true because we cannot
 		// decide for the inputs within if the cached model can be reused or not. There may be

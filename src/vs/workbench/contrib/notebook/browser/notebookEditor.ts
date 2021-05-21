@@ -11,7 +11,7 @@ import 'vs/css!./media/notebook';
 import { localize } from 'vs/nls';
 import { extname } from 'vs/base/common/resources';
 import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
-import { IEditorOptions, ITextEditorOptions, EditorOverride } from 'vs/platform/editor/common/editor';
+import { EditorOverride } from 'vs/platform/editor/common/editor';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { INotificationService, Severity } from 'vs/platform/notification/common/notification';
 import { IStorageService } from 'vs/platform/storage/common/storage';
@@ -26,9 +26,13 @@ import { IEditorDropService } from 'vs/workbench/services/editor/browser/editorD
 import { IEditorGroup, IEditorGroupsService, GroupsOrder } from 'vs/workbench/services/editor/common/editorGroupsService';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { NotebookEditorOptions, NOTEBOOK_EDITOR_ID } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
-import { INotebookService } from 'vs/workbench/contrib/notebook/common/notebookService';
 import { IBorrowValue, INotebookEditorService } from 'vs/workbench/contrib/notebook/browser/notebookEditorService';
 import { clearMarks, getAndClearMarks, mark } from 'vs/workbench/contrib/notebook/common/notebookPerformance';
+import { IFileService } from 'vs/platform/files/common/files';
+import { IActionViewItem } from 'vs/base/browser/ui/actionbar/actionbar';
+import { IAction } from 'vs/base/common/actions';
+import { SELECT_KERNEL_ID } from 'vs/workbench/contrib/notebook/browser/contrib/coreActions';
+import { NotebooKernelActionViewItem } from 'vs/workbench/contrib/notebook/browser/notebookKernelActionViewItem';
 
 const NOTEBOOK_EDITOR_VIEW_STATE_PREFERENCE_KEY = 'NotebookEditorViewState';
 
@@ -37,7 +41,7 @@ export class NotebookEditor extends EditorPane {
 
 	private readonly _editorMemento: IEditorMemento<INotebookEditorViewState>;
 	private readonly _groupListener = this._register(new DisposableStore());
-	private readonly _widgetDisposableStore: DisposableStore = new DisposableStore();
+	private readonly _widgetDisposableStore: DisposableStore = this._register(new DisposableStore());
 	private _widget: IBorrowValue<NotebookEditorWidget> = { value: undefined };
 	private _rootElement!: HTMLElement;
 	private _dimension?: DOM.Dimension;
@@ -58,12 +62,21 @@ export class NotebookEditor extends EditorPane {
 		@IEditorGroupsService private readonly _editorGroupService: IEditorGroupsService,
 		@IEditorDropService private readonly _editorDropService: IEditorDropService,
 		@INotificationService private readonly _notificationService: INotificationService,
-		@INotebookService private readonly _notebookService: INotebookService,
 		@INotebookEditorService private readonly _notebookWidgetService: INotebookEditorService,
 		@IContextKeyService private readonly _contextKeyService: IContextKeyService,
+		@IFileService private readonly fileService: IFileService,
 	) {
 		super(NotebookEditor.ID, telemetryService, themeService, storageService);
 		this._editorMemento = this.getEditorMemento<INotebookEditorViewState>(_editorGroupService, NOTEBOOK_EDITOR_VIEW_STATE_PREFERENCE_KEY);
+
+		this._register(this.fileService.onDidChangeFileSystemProviderCapabilities(e => this.onDidFileSystemProviderChange(e.scheme)));
+		this._register(this.fileService.onDidChangeFileSystemProviderRegistrations(e => this.onDidFileSystemProviderChange(e.scheme)));
+	}
+
+	private onDidFileSystemProviderChange(scheme: string): void {
+		if (this.input?.resource?.scheme === scheme && this._widget.value) {
+			this._widget.value.setOptions(new NotebookEditorOptions({ isReadOnly: this.input.isReadonly() }));
+		}
 	}
 
 	get viewModel(): NotebookViewModel | undefined {
@@ -92,6 +105,14 @@ export class NotebookEditor extends EditorPane {
 
 	getDomNode() {
 		return this._rootElement;
+	}
+
+	override getActionViewItem(action: IAction): IActionViewItem | undefined {
+		if (action.id === SELECT_KERNEL_ID) {
+			// this is being disposed by the consumer
+			return this.instantiationService.createInstance(NotebooKernelActionViewItem, action, this);
+		}
+		return undefined;
 	}
 
 	override getControl(): NotebookEditorWidget | undefined {
@@ -171,27 +192,25 @@ export class NotebookEditor extends EditorPane {
 				[{
 					label: localize('fail.reOpen', "Reopen file with VS Code standard text editor"),
 					run: async () => {
-						const fileEditorInput = this._editorService.createEditorInput({ resource: input.resource, forceFile: true });
-						const textOptions: IEditorOptions | ITextEditorOptions = { ...options, override: EditorOverride.DISABLED };
-						await this._editorService.openEditor(fileEditorInput, textOptions);
+						await this._editorService.openEditor({ resource: input.resource, forceFile: true, options: { ...options, override: EditorOverride.DISABLED } });
 					}
 				}]
 			);
 			return;
 		}
 
-		await this._notebookService.resolveNotebookEditor(model.viewType, model.resource, this._widget.value!.getId());
-		mark(input.resource, 'webviewCommLoaded');
+
 
 		const viewState = this._loadNotebookEditorViewState(input);
 
 		this._widget.value?.setParentContextKeyService(this._contextKeyService);
 		await this._widget.value!.setModel(model.notebook, viewState);
-		await this._widget.value!.setOptions(options instanceof NotebookEditorOptions ? options : undefined);
+		const isReadonly = input.isReadonly();
+		await this._widget.value!.setOptions(options instanceof NotebookEditorOptions ? options.with({ isReadOnly: isReadonly }) : new NotebookEditorOptions({ isReadOnly: isReadonly }));
 		this._widgetDisposableStore.add(this._widget.value!.onDidFocus(() => this._onDidFocusWidget.fire()));
 
 		this._widgetDisposableStore.add(this._editorDropService.createEditorDropTarget(this._widget.value!.getDomNode(), {
-			containsGroup: (group) => this.group?.id === group.group.id
+			containsGroup: (group) => this.group?.id === group.id
 		}));
 
 		mark(input.resource, 'editorLoaded');
