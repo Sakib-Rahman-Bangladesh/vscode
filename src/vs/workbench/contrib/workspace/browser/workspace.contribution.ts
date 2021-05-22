@@ -144,7 +144,7 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 		switch (result.choice) {
 			case 0:
 				if (result.checkboxChecked) {
-					this.workspaceTrustManagementService.setParentFolderTrust(true);
+					await this.workspaceTrustManagementService.setParentFolderTrust(true);
 				} else {
 					await this.workspaceTrustRequestService.completeRequest(true);
 				}
@@ -441,7 +441,7 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 						);
 
 						// Mark added/changed folders as trusted
-						this.workspaceTrustManagementService.setUrisTrust(addedFoldersTrustInfo.map(i => i.uri), result.choice === 0);
+						await this.workspaceTrustManagementService.setUrisTrust(addedFoldersTrustInfo.map(i => i.uri), result.choice === 0);
 
 						resolve();
 					}
@@ -469,10 +469,10 @@ class WorkspaceTrustEditorInputSerializer implements IEditorInputSerializer {
 	}
 
 	serialize(input: WorkspaceTrustEditorInput): string {
-		return '{}';
+		return '';
 	}
 
-	deserialize(instantiationService: IInstantiationService, serializedEditorInput: string): WorkspaceTrustEditorInput {
+	deserialize(instantiationService: IInstantiationService): WorkspaceTrustEditorInput {
 		return instantiationService.createInstance(WorkspaceTrustEditorInput);
 	}
 }
