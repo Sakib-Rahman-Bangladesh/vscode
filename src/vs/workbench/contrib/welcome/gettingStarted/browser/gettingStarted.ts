@@ -6,7 +6,7 @@
 import 'vs/css!./gettingStarted';
 import { localize } from 'vs/nls';
 import { IInstantiationService, optional } from 'vs/platform/instantiation/common/instantiation';
-import { EditorOptions, IEditorInputSerializer, IEditorOpenContext } from 'vs/workbench/common/editor';
+import { IEditorInputSerializer, IEditorOpenContext } from 'vs/workbench/common/editor';
 import { Disposable, DisposableStore, IDisposable, toDisposable } from 'vs/base/common/lifecycle';
 import { assertIsDefined } from 'vs/base/common/types';
 import { $, addDisposableListener, append, clearNode, Dimension, reset } from 'vs/base/browser/dom';
@@ -59,6 +59,7 @@ import { joinPath } from 'vs/base/common/resources';
 import { INotificationService } from 'vs/platform/notification/common/notification';
 import { asWebviewUri } from 'vs/workbench/api/common/shared/webview';
 import { Schemas } from 'vs/base/common/network';
+import { IEditorOptions } from 'vs/platform/editor/common/editor';
 
 const SLIDE_TRANSITION_TIME_MS = 250;
 const configurationKey = 'workbench.startupEditor';
@@ -165,7 +166,18 @@ export class GettingStartedPage extends EditorPane {
 
 		const rerender = () => {
 			this.gettingStartedCategories = this.gettingStartedService.getCategories();
-			this.buildSlideThrottle.queue(() => this.buildCategoriesSlide());
+			if (this.currentCategory && this.currentCategory.content.type === 'steps') {
+				const existingSteps = this.currentCategory.content.steps.map(step => step.id);
+				const newCategory = this.gettingStartedCategories.find(category => this.currentCategory?.id === category.id);
+				if (newCategory && newCategory.content.type === 'steps') {
+					const newSteps = newCategory.content.steps.map(step => step.id);
+					if (newSteps.length !== existingSteps.length || existingSteps.some((v, i) => v !== newSteps[i])) {
+						this.buildSlideThrottle.queue(() => this.buildCategoriesSlide());
+					}
+				}
+			} else {
+				this.buildSlideThrottle.queue(() => this.buildCategoriesSlide());
+			}
 		};
 
 		this._register(this.gettingStartedService.onDidAddCategory(rerender));
@@ -225,7 +237,7 @@ export class GettingStartedPage extends EditorPane {
 		this.recentlyOpened = workspacesService.getRecentlyOpened();
 	}
 
-	override async setInput(newInput: GettingStartedInput, options: EditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken) {
+	override async setInput(newInput: GettingStartedInput, options: IEditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken) {
 		this.container.classList.remove('animationReady');
 		this.editorInput = newInput;
 		await super.setInput(newInput, options, context, token);
