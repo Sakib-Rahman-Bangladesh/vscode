@@ -219,6 +219,11 @@ export class GettingStartedPage extends EditorPane {
 			if (!ourStep) {
 				throw Error('Could not find step with ID: ' + step.id);
 			}
+
+			if (!ourStep.done && category.content.stepsComplete === category.content.stepsTotal - 1) {
+				this.hideCategory(category.id);
+			}
+
 			ourStep.done = step.done;
 			if (category.id === this.currentCategory?.id) {
 				const badgeelements = assertIsDefined(document.querySelectorAll(`[data-done-step-id="${step.id}"]`));
@@ -471,7 +476,7 @@ export class GettingStartedPage extends EditorPane {
 			mediaElement.setAttribute('alt', media.altText);
 			this.updateMediaSourceForColorMode(mediaElement, media.path);
 
-			this.stepDisposables.add(addDisposableListener(mediaElement, 'click', () => {
+			this.stepDisposables.add(addDisposableListener(this.stepMediaComponent, 'click', () => {
 				const hrefs = flatten(stepToExpand.description.map(lt => lt.nodes.filter((node): node is ILink => typeof node !== 'string').map(node => node.href)));
 				if (hrefs.length === 1) {
 					const href = hrefs[0];
@@ -568,9 +573,11 @@ export class GettingStartedPage extends EditorPane {
 		if (id) {
 			const stepElement = assertIsDefined(this.container.querySelector<HTMLDivElement>(`[data-step-id="${id}"]`));
 			stepElement.parentElement?.querySelectorAll<HTMLElement>('.expanded').forEach(node => {
-				node.classList.remove('expanded');
-				node.style.height = ``;
-				node.setAttribute('aria-expanded', 'false');
+				if (node.getAttribute('data-step-id') !== id) {
+					node.classList.remove('expanded');
+					node.style.height = ``;
+					node.setAttribute('aria-expanded', 'false');
+				}
 			});
 			setTimeout(() => (stepElement as HTMLElement).focus(), delayFocus ? SLIDE_TRANSITION_TIME_MS : 0);
 
@@ -647,6 +654,7 @@ export class GettingStartedPage extends EditorPane {
 					}
 					checkbox.checked > img {
 						box-sizing: border-box;
+						margin-bottom: 4px;
 					}
 					checkbox.checked > img {
 						outline: 2px solid var(--vscode-focusBorder);
@@ -1198,6 +1206,7 @@ export class GettingStartedPage extends EditorPane {
 			this.editorInput.selectedStep = undefined;
 			this.selectStep(undefined);
 			this.setSlide('categories');
+			this.container.focus();
 		});
 	}
 
@@ -1247,7 +1256,6 @@ export class GettingStartedPage extends EditorPane {
 			this.container.querySelector('.gettingStartedSlideDetails')!.querySelectorAll('button').forEach(button => button.disabled = true);
 			this.container.querySelector('.gettingStartedSlideCategories')!.querySelectorAll('button').forEach(button => button.disabled = false);
 			this.container.querySelector('.gettingStartedSlideCategories')!.querySelectorAll('input').forEach(button => button.disabled = false);
-			this.container.focus();
 		} else {
 			slideManager.classList.add('showDetails');
 			slideManager.classList.remove('showCategories');
@@ -1255,6 +1263,10 @@ export class GettingStartedPage extends EditorPane {
 			this.container.querySelector('.gettingStartedSlideCategories')!.querySelectorAll('button').forEach(button => button.disabled = true);
 			this.container.querySelector('.gettingStartedSlideCategories')!.querySelectorAll('input').forEach(button => button.disabled = true);
 		}
+	}
+
+	override focus() {
+		this.container.focus();
 	}
 }
 
@@ -1288,6 +1300,8 @@ class GettingStartedIndexList<T> extends Disposable {
 
 	public itemCount: number;
 
+	private isDisposed = false;
+
 	constructor(
 		title: string,
 		klass: string,
@@ -1319,7 +1333,12 @@ class GettingStartedIndexList<T> extends Disposable {
 		this._register(this.onDidChangeEntries(listener));
 	}
 
-	register(d: IDisposable) { this._register(d); }
+	register(d: IDisposable) { if (this.isDisposed) { d.dispose(); } else { this._register(d); } }
+
+	override dispose() {
+		this.isDisposed = true;
+		super.dispose();
+	}
 
 	setLimit(limit: number) {
 		this.limit = limit;
