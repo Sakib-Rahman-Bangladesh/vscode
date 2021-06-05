@@ -402,11 +402,12 @@ export const walkthroughs: GettingStartedWalkthroughContent = [
 		title: localize('gettingStarted.notebook.title', "Customize Notebooks"),
 		description: '',
 		icon: setupIcon,
-		when: 'userHasOpenedNotebook',
+		when: 'config.notebook.experimental.gettingStarted && userHasOpenedNotebook',
 		content: {
 			type: 'steps',
 			steps: [
 				{
+					completionEvents: ['onCommand:notebook.setProfile'],
 					id: 'notebookProfile',
 					title: localize('gettingStarted.notebookProfile.title', "Select the layout for your notebooks"),
 					description: localize('gettingStarted.notebookProfile.description', "Get notebooks to feel just the way you prefer"),

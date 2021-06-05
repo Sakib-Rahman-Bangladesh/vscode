@@ -519,7 +519,7 @@ export class GettingStartedPage extends EditorPane {
 			this.stepDisposables.add(toDisposable(() => { isDisposed = true; }));
 
 			this.stepDisposables.add(webview.onDidClickLink(link => {
-				if (matchesScheme(link, Schemas.https) || matchesScheme(link, Schemas.https) || (matchesScheme(link, Schemas.command))) {
+				if (matchesScheme(link, Schemas.https) || matchesScheme(link, Schemas.http) || (matchesScheme(link, Schemas.command))) {
 					this.openerService.open(link, { allowCommands: true });
 				}
 			}));
@@ -631,8 +631,11 @@ export class GettingStartedPage extends EditorPane {
 				<style nonce="${nonce}">
 					${DEFAULT_MARKDOWN_STYLES}
 					${css}
-					img[centered] {
-						margin: 0 auto;
+					body > img {
+						align-self: flex-start;
+					}
+					body > img[centered] {
+						align-self: center;
 					}
 					body {
 						display: flex;
@@ -664,7 +667,8 @@ export class GettingStartedPage extends EditorPane {
 						margin-top: 0;
 					}
 					body > * {
-						margin-block-end: 0;
+						margin-block-end: 0.25em;
+						margin-block-start: 0.25em;
 					}
 					html {
 						height: 100%;
@@ -897,7 +901,7 @@ export class GettingStartedPage extends EditorPane {
 					$('button.button-link',
 						{
 							'x-dispatch': 'selectCategory:' + entry.id,
-							title: entry.description + this.getKeybindingLabel(entry.content.command),
+							title: entry.description + ' ' + this.getKeybindingLabel(entry.content.command),
 						},
 						this.iconWidgetFor(entry),
 						$('span', {}, entry.title)));
@@ -1074,7 +1078,7 @@ export class GettingStartedPage extends EditorPane {
 					}
 					this.openerService.open(command, { allowCommands: true });
 
-					if (!isCommand && node.href.startsWith('https://')) {
+					if (!isCommand && (node.href.startsWith('https://') || node.href.startsWith('http://'))) {
 						this.gettingStartedService.progressByEvent('onLink:' + node.href);
 					}
 
