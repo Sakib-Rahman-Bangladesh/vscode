@@ -29,12 +29,13 @@ import { CellEditState, ICellOutputViewModel, ICommonCellInfo, ICommonNotebookEd
 import { preloadsScriptStr, RendererMetadata } from 'vs/workbench/contrib/notebook/browser/view/renderers/webviewPreloads';
 import { transformWebviewThemeVars } from 'vs/workbench/contrib/notebook/browser/view/renderers/webviewThemeMapping';
 import { MarkdownCellViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/markdownCellViewModel';
-import { INotebookKernel, INotebookRendererInfo, RendererMessagingSpec } from 'vs/workbench/contrib/notebook/common/notebookCommon';
+import { INotebookRendererInfo, RendererMessagingSpec } from 'vs/workbench/contrib/notebook/common/notebookCommon';
+import { INotebookKernel } from 'vs/workbench/contrib/notebook/common/notebookKernelService';
 import { IScopedRendererMessaging } from 'vs/workbench/contrib/notebook/common/notebookRendererMessagingService';
 import { INotebookService } from 'vs/workbench/contrib/notebook/common/notebookService';
 import { IWebviewService, WebviewContentPurpose, WebviewElement } from 'vs/workbench/contrib/webview/browser/webview';
 import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
-import { ICreationRequestMessage, IMarkupCellInitialization, FromWebviewMessage, IClickedDataUrlMessage, IContentWidgetTopRequest, IControllerPreload, ToWebviewMessage } from './webviewMessages';
+import { ICreationRequestMessage, IMarkupCellInitialization, FromWebviewMessage, IClickedDataUrlMessage, IContentWidgetTopRequest, IControllerPreload, ToWebviewMessage, IAckOutputHeight } from './webviewMessages';
 
 export interface ICachedInset<K extends ICommonCellInfo> {
 	outputId: string;
@@ -261,12 +262,9 @@ export class BackLayerWebView<T extends ICommonCellInfo> extends Disposable {
 						border-collapse: collapse;
 					}
 
-					table {
-						width: 100%;
-					}
-
 					table, th, tr {
-						text-align: left !important;
+						vertical-align: top;
+						text-align: right;
 					}
 
 					thead {
@@ -777,12 +775,10 @@ var requirejs = (function() {
 		return true;
 	}
 
-	ackHeight(cellId: string, id: string, height: number): void {
+	ackHeight(updates: readonly IAckOutputHeight[]): void {
 		this._sendMessageToWebview({
 			type: 'ack-dimension',
-			cellId: cellId,
-			outputId: id,
-			height: height
+			updates
 		});
 	}
 
@@ -1011,9 +1007,9 @@ var requirejs = (function() {
 		if (content.type === RenderOutputType.Extension) {
 			const output = content.source.model;
 			renderer = content.renderer;
-			const outputDto = output.outputs.find(op => op.mime === content.mimeType);
+			const first = output.outputs.find(op => op.mime === content.mimeType)!;
 
-			// TODO@notebook - the message can contain "bytes" and those are transferable
+			// TODO@jrieken - the message can contain "bytes" and those are transferable
 			// which improves IPC performance and therefore should be used. However, it does
 			// means that the bytes cannot be used here anymore
 			message = {
@@ -1023,10 +1019,9 @@ var requirejs = (function() {
 				content: {
 					type: RenderOutputType.Extension,
 					outputId: output.outputId,
-					mimeType: content.mimeType,
-					valueBytes: new Uint8Array(outputDto?.valueBytes ?? []),
+					mimeType: first.mime,
+					valueBytes: first.data,
 					metadata: output.metadata,
-					metadata2: output.metadata
 				},
 			};
 		} else {
