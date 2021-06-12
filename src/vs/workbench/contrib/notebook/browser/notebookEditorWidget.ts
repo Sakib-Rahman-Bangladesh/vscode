@@ -52,10 +52,10 @@ import { OutputRenderer } from 'vs/workbench/contrib/notebook/browser/view/outpu
 import { BackLayerWebView, INotebookWebviewMessage } from 'vs/workbench/contrib/notebook/browser/view/renderers/backLayerWebView';
 import { CellContextKeyManager } from 'vs/workbench/contrib/notebook/browser/view/renderers/cellContextKeys';
 import { CellDragAndDropController } from 'vs/workbench/contrib/notebook/browser/view/renderers/cellDnd';
-import { CodeCellRenderer, ListTopCellToolbar, MarkdownCellRenderer, NotebookCellListDelegate } from 'vs/workbench/contrib/notebook/browser/view/renderers/cellRenderer';
+import { CodeCellRenderer, ListTopCellToolbar, MarkupCellRenderer, NotebookCellListDelegate } from 'vs/workbench/contrib/notebook/browser/view/renderers/cellRenderer';
 import { CodeCellViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/codeCellViewModel';
 import { NotebookEventDispatcher, NotebookLayoutChangedEvent } from 'vs/workbench/contrib/notebook/browser/viewModel/eventDispatcher';
-import { MarkdownCellViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/markdownCellViewModel';
+import { MarkupCellViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/markupCellViewModel';
 import { CellViewModel, IModelDecorationsChangeAccessor, INotebookEditorViewState, NotebookViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/notebookViewModel';
 import { NotebookTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookTextModel';
 import { CellKind, ExperimentalUseMarkdownRenderer, SelectionStateType } from 'vs/workbench/contrib/notebook/common/notebookCommon';
@@ -456,8 +456,34 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		return this.viewModel?.getSelections() ?? [];
 	}
 
+	setSelections(selections: ICellRange[]) {
+		if (!this.hasModel()) {
+			return;
+		}
+
+		const focus = this.viewModel.getFocus();
+		this.viewModel.updateSelectionsState({
+			kind: SelectionStateType.Index,
+			focus: focus,
+			selections: selections
+		});
+	}
+
 	getFocus() {
 		return this.viewModel?.getFocus() ?? { start: 0, end: 0 };
+	}
+
+	setFocus(focus: ICellRange) {
+		if (!this.hasModel()) {
+			return;
+		}
+
+		const selections = this.viewModel.getSelections();
+		this.viewModel.updateSelectionsState({
+			kind: SelectionStateType.Index,
+			focus: focus,
+			selections: selections
+		});
 	}
 
 	getSelectionViewModels(): ICellViewModel[] {
@@ -780,7 +806,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		const getScopedContextKeyService = (container: HTMLElement) => this._list.contextKeyService.createScoped(container);
 		const renderers = [
 			this.instantiationService.createInstance(CodeCellRenderer, this, this._renderedEditors, this._dndController, getScopedContextKeyService),
-			this.instantiationService.createInstance(MarkdownCellRenderer, this, this._dndController, this._renderedEditors, getScopedContextKeyService, { useRenderer: this.useRenderer }),
+			this.instantiationService.createInstance(MarkupCellRenderer, this, this._dndController, this._renderedEditors, getScopedContextKeyService, { useRenderer: this.useRenderer }),
 		];
 
 		renderers.forEach(renderer => {
@@ -1242,12 +1268,12 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 			outputs.forEach(output => this.hideInset(output));
 		}));
 		this._localStore.add(this._list.onDidRemoveCellsFromView(cells => {
-			const hiddenCells: MarkdownCellViewModel[] = [];
-			const deletedCells: MarkdownCellViewModel[] = [];
+			const hiddenCells: MarkupCellViewModel[] = [];
+			const deletedCells: MarkupCellViewModel[] = [];
 
 			for (const cell of cells) {
 				if (cell.cellKind === CellKind.Markup) {
-					const mdCell = cell as MarkdownCellViewModel;
+					const mdCell = cell as MarkupCellViewModel;
 					if (this.viewModel?.viewCells.find(cell => cell.handle === mdCell.handle)) {
 						// Cell has been folded but is still in model
 						hiddenCells.push(mdCell);
@@ -1258,8 +1284,8 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 				}
 			}
 
-			this.hideMarkdownPreviews(hiddenCells);
-			this.deleteMarkdownPreviews(deletedCells);
+			this.hideMarkupPreviews(hiddenCells);
+			this.deleteMarkupPreviews(deletedCells);
 		}));
 
 		// init rendering
@@ -1321,8 +1347,8 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		}
 
 		if (cell.cellKind === CellKind.Markup) {
-			store.add((cell as MarkdownCellViewModel).onDidHideInput(() => {
-				this.hideMarkdownPreviews([(cell as MarkdownCellViewModel)]);
+			store.add((cell as MarkupCellViewModel).onDidHideInput(() => {
+				this.hideMarkupPreviews([(cell as MarkupCellViewModel)]);
 			}));
 		}
 
@@ -1600,10 +1626,10 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		// a descendent of the notebook editor root.
 		const focused = DOM.isAncestor(document.activeElement, this._overlayContainer);
 		this._editorFocus.set(focused);
-		this.viewModel?.setFocus(focused);
+		this.viewModel?.setEditorFocus(focused);
 	}
 
-	hasFocus() {
+	hasEditorFocus() {
 		return this._editorFocus.get() || false;
 	}
 
@@ -1612,7 +1638,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 	}
 
 	hasOutputTextSelection() {
-		if (!this.hasFocus()) {
+		if (!this.hasEditorFocus()) {
 			return false;
 		}
 
@@ -1832,7 +1858,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		if (!this.hasModel()) {
 			return;
 		}
-		const { selected } = this.notebookKernelService.getMatchingKernel(this.viewModel.notebookDocument);
+		const { selected } = this.notebookKernelService.getMatchingKernel(this.textModel);
 		if (!this._webview?.isResolved()) {
 			await this._resolveWebview();
 		}
@@ -1840,7 +1866,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 	}
 
 	get activeKernel() {
-		return this.viewModel && this._kernelManger.getSelectedOrSuggestedKernel(this.viewModel.notebookDocument);
+		return this.textModel && this._kernelManger.getSelectedOrSuggestedKernel(this.textModel);
 	}
 
 	async cancelNotebookCells(cells?: Iterable<ICellViewModel>): Promise<void> {
@@ -1850,7 +1876,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		if (!cells) {
 			cells = this.viewModel.viewCells;
 		}
-		return this._kernelManger.cancelNotebookCells(this.viewModel.notebookDocument, cells);
+		return this._kernelManger.cancelNotebookCells(this.textModel, cells);
 	}
 
 	async executeNotebookCells(cells?: Iterable<ICellViewModel>): Promise<void> {
@@ -1860,7 +1886,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		if (!cells) {
 			cells = this.viewModel.viewCells;
 		}
-		return this._kernelManger.executeNotebookCells(this.viewModel.notebookDocument, cells);
+		return this._kernelManger.executeNotebookCells(this.textModel, cells);
 	}
 
 	//#endregion
@@ -2251,7 +2277,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		};
 	}
 
-	async createMarkdownPreview(cell: MarkdownCellViewModel) {
+	async createMarkupPreview(cell: MarkupCellViewModel) {
 		if (!this.useRenderer) {
 			// TODO: handle case where custom renderer is disabled?
 			return;
@@ -2270,7 +2296,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		}
 
 		const cellTop = this._list.getAbsoluteTopOfElement(cell);
-		await this._webview.showMarkdownPreview({
+		await this._webview.showMarkupPreview({
 			mime: cell.mime,
 			cellHandle: cell.handle,
 			cellId: cell.id,
@@ -2280,7 +2306,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		});
 	}
 
-	async unhideMarkdownPreviews(cells: readonly MarkdownCellViewModel[]) {
+	async unhideMarkupPreviews(cells: readonly MarkupCellViewModel[]) {
 		if (!this.useRenderer) {
 			// TODO: handle case where custom renderer is disabled?
 			return;
@@ -2294,10 +2320,10 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 			await this._resolveWebview();
 		}
 
-		await this._webview?.unhideMarkdownPreviews(cells.map(cell => cell.id));
+		await this._webview?.unhideMarkupPreviews(cells.map(cell => cell.id));
 	}
 
-	async hideMarkdownPreviews(cells: readonly MarkdownCellViewModel[]) {
+	async hideMarkupPreviews(cells: readonly MarkupCellViewModel[]) {
 		if (!this.useRenderer) {
 			// TODO: handle case where custom renderer is disabled?
 			return;
@@ -2311,10 +2337,10 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 			await this._resolveWebview();
 		}
 
-		await this._webview?.hideMarkdownPreviews(cells.map(cell => cell.id));
+		await this._webview?.hideMarkupPreviews(cells.map(cell => cell.id));
 	}
 
-	async deleteMarkdownPreviews(cells: readonly MarkdownCellViewModel[]) {
+	async deleteMarkupPreviews(cells: readonly MarkupCellViewModel[]) {
 		if (!this.useRenderer) {
 			// TODO: handle case where custom renderer is disabled?
 			return;
@@ -2328,7 +2354,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 			await this._resolveWebview();
 		}
 
-		await this._webview?.deleteMarkdownPreviews(cells.map(cell => cell.id));
+		await this._webview?.deleteMarkupPreviews(cells.map(cell => cell.id));
 	}
 
 	private async updateSelectedMarkdownPreviews(): Promise<void> {
@@ -2343,7 +2369,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		const selectedCells = this.getSelectionViewModels().map(cell => cell.id);
 
 		// Only show selection when there is more than 1 cell selected
-		await this._webview?.updateMarkdownPreviewSelections(selectedCells.length > 1 ? selectedCells : []);
+		await this._webview?.updateMarkupPreviewSelections(selectedCells.length > 1 ? selectedCells : []);
 	}
 
 	async createOutput(cell: CodeCellViewModel, output: IInsetRenderOutput, offset: number): Promise<void> {
@@ -2488,7 +2514,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		this._webview.removeInsets(removedItems);
 
 		const markdownUpdateItems: { id: string, top: number; }[] = [];
-		for (const cellId of this._webview.markdownPreviewMapping.keys()) {
+		for (const cellId of this._webview.markupPreviewMapping.keys()) {
 			const cell = this.viewModel?.viewCells.find(cell => cell.id === cellId);
 			if (cell) {
 				const cellTop = this._list.getAbsoluteTopOfElement(cell);
@@ -2520,46 +2546,46 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		}
 	}
 
-	updateMarkdownCellHeight(cellId: string, height: number, isInit: boolean) {
+	updateMarkupCellHeight(cellId: string, height: number, isInit: boolean) {
 		const cell = this.getCellById(cellId);
-		if (cell && cell instanceof MarkdownCellViewModel) {
+		if (cell && cell instanceof MarkupCellViewModel) {
 			const { bottomToolbarGap } = this._notebookOptions.computeBottomToolbarDimensions(this.viewModel?.viewType);
 			this._debug('updateMarkdownCellHeight', cell.handle, height + bottomToolbarGap, isInit);
 			cell.renderedMarkdownHeight = height;
 		}
 	}
 
-	setMarkdownCellEditState(cellId: string, editState: CellEditState): void {
+	setMarkupCellEditState(cellId: string, editState: CellEditState): void {
 		const cell = this.getCellById(cellId);
-		if (cell instanceof MarkdownCellViewModel) {
+		if (cell instanceof MarkupCellViewModel) {
 			cell.updateEditState(editState, 'setMarkdownCellEditState');
 		}
 	}
 
-	markdownCellDragStart(cellId: string, event: { dragOffsetY: number; }): void {
+	didStartDragMarkupCell(cellId: string, event: { dragOffsetY: number; }): void {
 		const cell = this.getCellById(cellId);
-		if (cell instanceof MarkdownCellViewModel) {
+		if (cell instanceof MarkupCellViewModel) {
 			this._dndController?.startExplicitDrag(cell, event.dragOffsetY);
 		}
 	}
 
-	markdownCellDrag(cellId: string, event: { dragOffsetY: number; }): void {
+	didDragMarkupCell(cellId: string, event: { dragOffsetY: number; }): void {
 		const cell = this.getCellById(cellId);
-		if (cell instanceof MarkdownCellViewModel) {
+		if (cell instanceof MarkupCellViewModel) {
 			this._dndController?.explicitDrag(cell, event.dragOffsetY);
 		}
 	}
 
-	markdownCellDrop(cellId: string, event: { dragOffsetY: number, ctrlKey: boolean, altKey: boolean; }): void {
+	didDropMarkupCell(cellId: string, event: { dragOffsetY: number, ctrlKey: boolean, altKey: boolean; }): void {
 		const cell = this.getCellById(cellId);
-		if (cell instanceof MarkdownCellViewModel) {
+		if (cell instanceof MarkupCellViewModel) {
 			this._dndController?.explicitDrop(cell, event);
 		}
 	}
 
-	markdownCellDragEnd(cellId: string): void {
+	didEndDragMarkupCell(cellId: string): void {
 		const cell = this.getCellById(cellId);
-		if (cell instanceof MarkdownCellViewModel) {
+		if (cell instanceof MarkupCellViewModel) {
 			this._dndController?.endExplicitDrag(cell);
 		}
 	}
