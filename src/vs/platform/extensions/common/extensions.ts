@@ -138,8 +138,8 @@ export interface IStartEntry {
 	readonly title: string;
 	readonly description: string;
 	readonly command: string;
-	readonly type?: 'sample-folder' | 'sample-notebook' | string;
 	readonly when?: string;
+	readonly category?: 'window' | 'file' | 'folder' | 'notebook' | 'terminal' | 'configuration';
 }
 
 export interface IExtensionContributions {
