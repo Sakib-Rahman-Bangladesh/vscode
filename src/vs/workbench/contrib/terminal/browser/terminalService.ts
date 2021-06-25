@@ -39,7 +39,7 @@ import { getColorClass, getUriClasses } from 'vs/workbench/contrib/terminal/brow
 import { configureTerminalProfileIcon } from 'vs/workbench/contrib/terminal/browser/terminalIcons';
 import { TerminalInstance } from 'vs/workbench/contrib/terminal/browser/terminalInstance';
 import { TerminalViewPane } from 'vs/workbench/contrib/terminal/browser/terminalView';
-import { IRemoteTerminalAttachTarget, IStartExtensionTerminalRequest, ITerminalConfigHelper, ITerminalProcessExtHostProxy, ITerminalProfileContribution, KEYBINDING_CONTEXT_TERMINAL_ALT_BUFFER_ACTIVE, KEYBINDING_CONTEXT_TERMINAL_COUNT, KEYBINDING_CONTEXT_TERMINAL_FOCUS, KEYBINDING_CONTEXT_TERMINAL_IS_OPEN, KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED, KEYBINDING_CONTEXT_TERMINAL_SHELL_TYPE, TerminalLocation, TERMINAL_VIEW_ID } from 'vs/workbench/contrib/terminal/common/terminal';
+import { IRemoteTerminalAttachTarget, IStartExtensionTerminalRequest, ITerminalConfigHelper, ITerminalProcessExtHostProxy, ITerminalProfileContribution, KEYBINDING_CONTEXT_TERMINAL_ALT_BUFFER_ACTIVE, KEYBINDING_CONTEXT_TERMINAL_FOCUS, KEYBINDING_CONTEXT_TERMINAL_IS_OPEN, KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED, KEYBINDING_CONTEXT_TERMINAL_SHELL_TYPE, TerminalLocation, TERMINAL_VIEW_ID } from 'vs/workbench/contrib/terminal/common/terminal';
 import { ITerminalContributionService } from 'vs/workbench/contrib/terminal/common/terminalExtensionPoints';
 import { formatMessageForTerminal, terminalStrings } from 'vs/workbench/contrib/terminal/common/terminalStrings';
 import { IEditorOverrideService, RegisteredEditorPriority } from 'vs/workbench/services/editor/common/editorOverrideService';
@@ -55,7 +55,6 @@ export class TerminalService implements ITerminalService {
 
 	private _isShuttingDown: boolean;
 	private _terminalFocusContextKey: IContextKey<boolean>;
-	private _terminalCountContextKey: IContextKey<number>;
 	private _terminalShellTypeContextKey: IContextKey<string>;
 	private _terminalAltBufferActiveContextKey: IContextKey<boolean>;
 	private _backgroundedTerminalInstances: ITerminalInstance[] = [];
@@ -155,7 +154,6 @@ export class TerminalService implements ITerminalService {
 		this._isShuttingDown = false;
 		this._findState = new FindReplaceState();
 		this._terminalFocusContextKey = KEYBINDING_CONTEXT_TERMINAL_FOCUS.bindTo(this._contextKeyService);
-		this._terminalCountContextKey = KEYBINDING_CONTEXT_TERMINAL_COUNT.bindTo(this._contextKeyService);
 		this._terminalShellTypeContextKey = KEYBINDING_CONTEXT_TERMINAL_SHELL_TYPE.bindTo(this._contextKeyService);
 		this._terminalAltBufferActiveContextKey = KEYBINDING_CONTEXT_TERMINAL_ALT_BUFFER_ACTIVE.bindTo(this._contextKeyService);
 		this._configHelper = _instantiationService.createInstance(TerminalConfigHelper);
@@ -201,7 +199,6 @@ export class TerminalService implements ITerminalService {
 		// we update detected profiles when an instance is created so that,
 		// for example, we detect if you've installed a pwsh
 		this.onInstanceCreated(() => this._refreshAvailableProfiles());
-		this.onDidChangeInstances(() => this._terminalCountContextKey.set(this.instances.length));
 		this.onInstanceLinksReady(instance => this._setInstanceLinkProviders(instance));
 
 		// Hide the panel if there are no more instances, provided that VS Code is not shutting
@@ -600,10 +597,6 @@ export class TerminalService implements ITerminalService {
 	splitInstance(instanceToSplit: ITerminalInstance, shellLaunchConfig?: IShellLaunchConfig): ITerminalInstance | null;
 	splitInstance(instanceToSplit: ITerminalInstance, profile: ITerminalProfile, cwd?: string | URI): ITerminalInstance | null
 	splitInstance(instanceToSplit: ITerminalInstance, shellLaunchConfigOrProfile: IShellLaunchConfig | ITerminalProfile = {}, cwd?: string | URI): ITerminalInstance | null {
-		const group = this._terminalGroupService.getGroupForInstance(instanceToSplit);
-		if (!group) {
-			return null;
-		}
 		const shellLaunchConfig = this._convertProfileToShellLaunchConfig(shellLaunchConfigOrProfile, cwd);
 
 		// Use the URI from the base instance if it exists, this will correctly split local terminals
@@ -615,11 +608,27 @@ export class TerminalService implements ITerminalService {
 			this._evaluateLocalCwd(shellLaunchConfig);
 		}
 
-		const instance = group.split(shellLaunchConfig);
+		// Handle editor terminals
+		let instance: ITerminalInstance;
+		switch (instanceToSplit.target) {
+			case TerminalLocation.Editor:
+				instance = this._terminalEditorService.splitInstance(instanceToSplit, shellLaunchConfig);
+				break;
+			case TerminalLocation.TerminalView:
+			default:
+				const group = this._terminalGroupService.getGroupForInstance(instanceToSplit);
+				if (!group) {
+					return null;
+				}
+				instance = group.split(shellLaunchConfig);
+				break;
+		}
 
 		this._initInstanceListeners(instance);
 
-		this._terminalGroupService.groups.forEach((g, i) => g.setVisible(i === this._terminalGroupService.activeGroupIndex));
+		if (instanceToSplit.target !== TerminalLocation.Editor) {
+			this._terminalGroupService.groups.forEach((g, i) => g.setVisible(i === this._terminalGroupService.activeGroupIndex));
+		}
 		return instance;
 	}
 
@@ -868,7 +877,7 @@ export class TerminalService implements ITerminalService {
 			return;
 		}
 		if (type === 'createInstance') {
-			const activeInstance = this.activeInstance;
+			const activeInstance = this.getDefaultInstanceHost().activeInstance;
 			let instance;
 
 			if ('id' in value.profile) {
@@ -913,8 +922,25 @@ export class TerminalService implements ITerminalService {
 		return undefined;
 	}
 
-	getFindHost(): ITerminalFindHost {
-		return this.activeInstance?.target === TerminalLocation.Editor ? this._terminalEditorService : this._terminalGroupService;
+	getDefaultInstanceHost(): ITerminalInstanceHost {
+		if (this.configHelper.config.defaultLocation === TerminalLocation.Editor) {
+			return this._terminalEditorService;
+		}
+		return this._terminalGroupService;
+	}
+
+	getInstanceHost(target: TerminalLocation | undefined): ITerminalInstanceHost {
+		if (target) {
+			if (target === TerminalLocation.Editor) {
+				return this._terminalEditorService;
+			}
+			return this._terminalGroupService;
+		}
+		return this;
+	}
+
+	getFindHost(instance: ITerminalInstance | undefined = this.activeInstance): ITerminalFindHost {
+		return instance?.target === TerminalLocation.Editor ? this._terminalEditorService : this._terminalGroupService;
 	}
 
 	async createContributedTerminalProfile(extensionIdentifier: string, id: string, isSplitTerminal: boolean): Promise<void> {
@@ -996,6 +1022,7 @@ export class TerminalService implements ITerminalService {
 	}
 
 	createTerminal(options?: ICreateTerminalOptions): ITerminalInstance {
+		console.log(options);
 		const shellLaunchConfig = this._convertProfileToShellLaunchConfig(options?.config || options);
 
 		if (options?.cwd) {
@@ -1018,7 +1045,7 @@ export class TerminalService implements ITerminalService {
 		this._evaluateLocalCwd(shellLaunchConfig);
 
 		let instance: ITerminalInstance;
-		if (options?.target === TerminalLocation.Editor || this.configHelper.config.defaultLocation === TerminalLocation.Editor) {
+		if (options?.target === TerminalLocation.Editor) {
 			instance = this.createInstance(shellLaunchConfig);
 			instance.target = TerminalLocation.Editor;
 			this._terminalEditorService.openEditor(instance);
@@ -1027,13 +1054,6 @@ export class TerminalService implements ITerminalService {
 			instance = group.terminalInstances[0];
 		}
 		this._initInstanceListeners(instance);
-		this._onDidChangeInstances.fire();
-
-		if (this.instances.length === 1) {
-			// It's the first instance so it should be made active automatically, this must fire
-			// after onInstancesChanged so consumers can react to the instance being added first
-			this._terminalGroupService.setActiveInstanceByIndex(0);
-		}
 		return instance;
 	}
 
