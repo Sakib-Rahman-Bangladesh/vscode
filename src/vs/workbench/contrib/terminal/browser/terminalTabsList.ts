@@ -232,7 +232,7 @@ class TerminalTabsRenderer implements IListRenderer<ITerminalInstance, ITerminal
 		const actionBar = new ActionBar(actionsContainer, {
 			actionViewItemProvider: action =>
 				action instanceof MenuItemAction
-					? this._instantiationService.createInstance(MenuEntryActionViewItem, action)
+					? this._instantiationService.createInstance(MenuEntryActionViewItem, action, undefined)
 					: undefined
 		});
 
@@ -541,6 +541,12 @@ class TerminalTabsDragAndDrop implements IListDragAndDrop<ITerminalInstance> {
 		return elements.length === 1 ? elements[0].title : undefined;
 	}
 
+	onDragLeave() {
+		this._autoFocusInstance = undefined;
+		this._autoFocusDisposable.dispose();
+		this._autoFocusDisposable = Disposable.None;
+	}
+
 	onDragStart(data: IDragAndDropData, originalEvent: DragEvent): void {
 		if (!originalEvent.dataTransfer) {
 			return;
@@ -595,13 +601,14 @@ class TerminalTabsDragAndDrop implements IListDragAndDrop<ITerminalInstance> {
 		let sourceInstances: ITerminalInstance[] | undefined;
 		const terminalResources = originalEvent.dataTransfer?.getData(DataTransfers.TERMINALS);
 		if (terminalResources) {
-			const uri = URI.parse(JSON.parse(terminalResources)[0]);
-			if (uri.scheme === Schemas.vscodeTerminal) {
+			const json = JSON.parse(terminalResources);
+			for (const entry of json) {
+				const uri = URI.parse(entry);
 				const instance = this._terminalService.instances.find(e => e.resource.path === uri.path);
 				if (instance) {
 					sourceInstances = [instance];
+					this._terminalService.moveToTerminalView(instance);
 				}
-				this._terminalService.moveToTerminalView(instance);
 			}
 		}
 

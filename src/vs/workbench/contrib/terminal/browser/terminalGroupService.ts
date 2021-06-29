@@ -225,7 +225,7 @@ export class TerminalGroupService extends Disposable implements ITerminalGroupSe
 		// Adjust focus if the group was active
 		if (wasActiveGroup && this.groups.length > 0) {
 			const newIndex = index < this.groups.length ? index : this.groups.length - 1;
-			this.setActiveGroupByIndex(newIndex);
+			this.setActiveGroupByIndex(newIndex, true);
 			this.activeInstance?.focus(true);
 		} else if (this.activeGroupIndex >= this.groups.length) {
 			const newIndex = this.groups.length - 1;
@@ -243,13 +243,17 @@ export class TerminalGroupService extends Disposable implements ITerminalGroupSe
 		}
 	}
 
-	setActiveGroupByIndex(index: number) {
+	/**
+	 * @param force Whether to force the group change, this should be used when the previous active
+	 * group has been removed.
+	 */
+	setActiveGroupByIndex(index: number, force?: boolean) {
 		if (index >= this.groups.length) {
 			return;
 		}
 		const oldActiveGroup = this.activeGroup;
 		this.activeGroupIndex = index;
-		if (oldActiveGroup !== this.activeGroup) {
+		if (force || oldActiveGroup !== this.activeGroup) {
 			this.groups.forEach((g, i) => g.setVisible(i === this.activeGroupIndex));
 			this._onDidChangeActiveGroup.fire(this.activeGroup);
 			this._onDidChangeActiveInstance.fire(this.activeInstance);
@@ -284,14 +288,15 @@ export class TerminalGroupService extends Disposable implements ITerminalGroupSe
 		}
 
 		this.activeInstanceIndex = instanceLocation.instanceIndex;
-		this.activeGroupIndex = instanceLocation.groupIndex;
 
 		if (this.activeGroupIndex !== instanceLocation.groupIndex) {
+			this.activeGroupIndex = instanceLocation.groupIndex;
 			this._onDidChangeActiveGroup.fire(this.activeGroup);
 		}
 		this.groups.forEach((g, i) => g.setVisible(i === instanceLocation.groupIndex));
 
 		instanceLocation.group.setActiveInstanceByIndex(this.activeInstanceIndex);
+		this._onDidChangeActiveInstance.fire(newActiveInstance);
 	}
 
 	setActiveGroupToNext() {
