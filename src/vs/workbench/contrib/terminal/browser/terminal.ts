@@ -138,8 +138,6 @@ export interface ITerminalService extends ITerminalInstanceHost {
 	/**
 	 * Creates a raw terminal instance, this should not be used outside of the terminal part.
 	 */
-	createInstance(profile: ITerminalProfile): ITerminalInstance;
-	createInstance(shellLaunchConfig: IShellLaunchConfig): ITerminalInstance;
 	getInstanceFromId(terminalId: number): ITerminalInstance | undefined;
 	getInstanceFromIndex(terminalIndex: number): ITerminalInstance;
 	getInstanceFromResource(resource: URI | undefined): ITerminalInstance | undefined;
@@ -251,7 +249,7 @@ export interface ITerminalGroupService extends ITerminalInstanceHost, ITerminalF
 
 	setContainer(container: HTMLElement): void;
 
-	showPanel(focus?: boolean, force?: boolean): Promise<void>;
+	showPanel(focus?: boolean): Promise<void>;
 	hidePanel(): void;
 	focusTabs(): void;
 	showTabs(): void;

@@ -204,7 +204,7 @@ suite('EditorService', () => {
 		disposables.add(accessor.editorOverrideService.registerEditor(
 			'*.editor-service-override-tests',
 			{ id: TEST_EDITOR_INPUT_ID, label: 'Label', priority: RegisteredEditorPriority.exclusive },
-			{},
+			{ canHandleDiff: true },
 			editor => {
 				editorFactoryCalled++;
 				lastEditorFactoryEditor = editor;
@@ -1329,6 +1329,12 @@ suite('EditorService', () => {
 		input = service.createEditorInput(untypedInput);
 		assert(input instanceof UntitledTextEditorInput);
 		assert.ok(!(input as UntitledTextEditorInput).model.hasAssociatedFilePath);
+
+		// Untyped input (untitled with custom resource, but forceUntitled)
+		untypedInput = { resource: URI.file('/fake'), forceUntitled: true };
+		assert.ok(isUntitledResourceEditorInput(untypedInput));
+		input = service.createEditorInput(untypedInput);
+		assert(input instanceof UntitledTextEditorInput);
 
 		// Untyped Input (untitled with custom resource)
 		const provider = instantiationService.createInstance(FileServiceProvider, 'untitled-custom');

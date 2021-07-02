@@ -585,11 +585,9 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 		}
 
 		// Typed editors that cannot convert to untyped will be taken
-		// as is without override. We still want to resolve a group though.
+		// as is without override.
 		if (!untypedEditor) {
-			const [group, activation] = this.findTargetGroup(editor, preferredGroup);
-
-			return [OverrideStatus.NONE, group, activation];
+			return [OverrideStatus.NONE, undefined, undefined];
 		}
 
 		// We need a `override` for the untyped editor if it is
@@ -602,6 +600,11 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 			}
 
 			hasConflictingDefaults = populatedInfo.conflictingDefault;
+		}
+
+		// If we didn't get an override just return as none and let the editor continue as normal
+		if (!untypedEditor.options?.override) {
+			return [OverrideStatus.NONE, undefined, undefined];
 		}
 
 		// Find the target group for the editor
