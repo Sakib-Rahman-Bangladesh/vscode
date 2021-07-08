@@ -41,7 +41,7 @@ import { TerminalViewPane } from 'vs/workbench/contrib/terminal/browser/terminal
 import { IRemoteTerminalAttachTarget, IStartExtensionTerminalRequest, ITerminalConfigHelper, ITerminalProcessExtHostProxy, ITerminalProfileContribution, KEYBINDING_CONTEXT_TERMINAL_IS_OPEN, KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED, TERMINAL_VIEW_ID } from 'vs/workbench/contrib/terminal/common/terminal';
 import { ITerminalContributionService } from 'vs/workbench/contrib/terminal/common/terminalExtensionPoints';
 import { formatMessageForTerminal, terminalStrings } from 'vs/workbench/contrib/terminal/common/terminalStrings';
-import { IEditorOverrideService, RegisteredEditorPriority } from 'vs/workbench/services/editor/common/editorOverrideService';
+import { IEditorResolverService, RegisteredEditorPriority } from 'vs/workbench/services/editor/common/editorResolverService';
 import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
 import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
 import { ILifecycleService, ShutdownReason, WillShutdownEvent } from 'vs/workbench/services/lifecycle/common/lifecycle';
@@ -84,7 +84,18 @@ export class TerminalService implements ITerminalService {
 	}
 
 	private _activeInstance: ITerminalInstance | undefined;
-	get activeInstance(): ITerminalInstance | undefined { return this._activeInstance; }
+	get activeInstance(): ITerminalInstance | undefined {
+		// Check if either an editor or panel terminal has focus and return that, regardless of the
+		// value of _activeInstance. This avoids terminals created in the panel for example stealing
+		// the active status even when it's not focused.
+		for (const activeHostTerminal of this._hostActiveTerminals.values()) {
+			if (activeHostTerminal?.hasFocus) {
+				return activeHostTerminal;
+			}
+		}
+		// Fallback to the last recorded active terminal if neither have focus
+		return this._activeInstance;
+	}
 
 	private readonly _onDidChangeActiveGroup = new Emitter<ITerminalGroup | undefined>();
 	get onDidChangeActiveGroup(): Event<ITerminalGroup | undefined> { return this._onDidChangeActiveGroup.event; }
@@ -144,7 +155,7 @@ export class TerminalService implements ITerminalService {
 		@ITerminalEditorService private readonly _terminalEditorService: ITerminalEditorService,
 		@ITerminalGroupService private readonly _terminalGroupService: ITerminalGroupService,
 		@ITerminalInstanceService private readonly _terminalInstanceService: ITerminalInstanceService,
-		@IEditorOverrideService editorOverrideService: IEditorOverrideService,
+		@IEditorResolverService editorResolverService: IEditorResolverService,
 		@IExtensionService private readonly _extensionService: IExtensionService,
 		@INotificationService private readonly _notificationService: INotificationService,
 		@optional(ILocalTerminalService) localTerminalService: ILocalTerminalService
@@ -154,7 +165,7 @@ export class TerminalService implements ITerminalService {
 		this._findState = new FindReplaceState();
 		this._configHelper = _instantiationService.createInstance(TerminalConfigHelper);
 
-		editorOverrideService.registerEditor(
+		editorResolverService.registerEditor(
 			`${Schemas.vscodeTerminal}:/**`,
 			{
 				id: TerminalEditor.ID,
