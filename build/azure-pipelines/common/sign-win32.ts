@@ -3,16 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-.monaco-workbench .part > .content > .composite {
-	height: 100%;
-}
+import { main } from './sign';
+import * as path from 'path';
 
-.monaco-workbench .part > .composite.title {
-	display: flex;
-}
-
-.monaco-workbench .part > .composite.title > .title-actions {
-	flex: 1;
-	padding-left: 5px;
-	overflow: hidden;
-}
+main([
+	process.env['EsrpCliDllPath']!,
+	'windows',
+	process.env['ESRPPKI']!,
+	process.env['ESRPAADUsername']!,
+	process.env['ESRPAADPassword']!,
+	path.dirname(process.argv[2]),
+	path.basename(process.argv[2])
+]);
