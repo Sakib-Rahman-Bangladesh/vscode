@@ -63,6 +63,7 @@ import { getColorClass } from 'vs/workbench/contrib/terminal/browser/terminalIco
 import { IWorkbenchLayoutService, Position } from 'vs/workbench/services/layout/browser/layoutService';
 import { Orientation } from 'vs/base/browser/ui/sash/sash';
 import { Color } from 'vs/base/common/color';
+import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
 
 // How long in milliseconds should an average frame take to render for a notification to appear
 // which suggests the fallback DOM-based renderer
@@ -159,7 +160,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 	get resource(): URI {
 		return URI.from({
 			scheme: Schemas.vscodeTerminal,
-			path: `/${this.instanceId}`,
+			path: `/${this._workspaceContextService.getWorkspace().id}/${this.instanceId}`,
 			fragment: this.title,
 		});
 	}
@@ -188,6 +189,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 	// TODO: How does this work with detached processes?
 	// TODO: Should this be an event as it can fire twice?
 	get processReady(): Promise<void> { return this._processManager.ptyProcessReady; }
+	get hasChildProcesses(): boolean { return this._processManager.hasChildProcesses; }
 	get areLinksReady(): boolean { return this._areLinksReady; }
 	get initialDataEvents(): string[] | undefined { return this._initialDataEvents; }
 	get exitCode(): number | undefined { return this._exitCode; }
@@ -213,8 +215,6 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 
 	private readonly _onDisposed = this._register(new Emitter<ITerminalInstance>());
 	readonly onDisposed = this._onDisposed.event;
-	private readonly _onFocused = this._register(new Emitter<ITerminalInstance>());
-	readonly onFocused = this._onFocused.event;
 	private readonly _onProcessIdReady = this._register(new Emitter<ITerminalInstance>());
 	readonly onProcessIdReady = this._onProcessIdReady.event;
 	private readonly _onLinksReady = this._register(new Emitter<ITerminalInstance>());
@@ -235,10 +235,14 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 	readonly onDimensionsChanged = this._onDimensionsChanged.event;
 	private readonly _onMaximumDimensionsChanged = this._register(new Emitter<void>());
 	readonly onMaximumDimensionsChanged = this._onMaximumDimensionsChanged.event;
-	private readonly _onFocus = this._register(new Emitter<ITerminalInstance>());
-	readonly onFocus = this._onFocus.event;
+	private readonly _onDidFocus = this._register(new Emitter<ITerminalInstance>());
+	readonly onDidFocus = this._onDidFocus.event;
+	private readonly _onDidBlur = this._register(new Emitter<ITerminalInstance>());
+	readonly onDidBlur = this._onDidBlur.event;
 	private readonly _onRequestAddInstanceToGroup = this._register(new Emitter<IRequestAddInstanceToGroupEvent>());
 	readonly onRequestAddInstanceToGroup = this._onRequestAddInstanceToGroup.event;
+	private readonly _onDidChangeHasChildProcesses = this._register(new Emitter<boolean>());
+	readonly onDidChangeHasChildProcesses = this._onDidChangeHasChildProcesses.event;
 
 	constructor(
 		private readonly _terminalFocusContextKey: IContextKey<boolean>,
@@ -263,7 +267,8 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		@IViewDescriptorService private readonly _viewDescriptorService: IViewDescriptorService,
 		@IProductService private readonly _productService: IProductService,
 		@IQuickInputService private readonly _quickInputService: IQuickInputService,
-		@IWorkbenchEnvironmentService workbenchEnvironmentService: IWorkbenchEnvironmentService
+		@IWorkbenchEnvironmentService workbenchEnvironmentService: IWorkbenchEnvironmentService,
+		@IWorkspaceContextService private readonly _workspaceContextService: IWorkspaceContextService
 	) {
 		super();
 
@@ -709,7 +714,6 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 
 		this._setAriaLabel(xterm, this._instanceId, this._title);
 
-		xterm.textarea.addEventListener('focus', () => this._onFocus.fire(this));
 		xterm.attachCustomKeyEventHandler((event: KeyboardEvent): boolean => {
 			// Disable all input if the terminal is exiting
 			if (this._isExiting) {
@@ -814,11 +818,12 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 			} else {
 				this._terminalShellTypeContextKey.reset();
 			}
-			this._onFocused.fire(this);
+			this._onDidFocus.fire(this);
 		}));
 
 		this._register(dom.addDisposableListener(xterm.textarea, 'blur', () => {
 			this._terminalFocusContextKey.reset();
+			this._onDidBlur.fire(this);
 			this._refreshSelectionContextKey();
 		}));
 
@@ -1157,6 +1162,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		});
 		this._processManager.onProcessOverrideDimensions(e => this.setDimensions(e, true));
 		this._processManager.onProcessResolvedShellLaunchConfig(e => this._setResolvedShellLaunchConfig(e));
+		this._processManager.onProcessDidChangeHasChildProcesses(e => this._onDidChangeHasChildProcesses.fire(e));
 		this._processManager.onEnvironmentVariableInfoChanged(e => this._onEnvironmentVariableInfoChanged(e));
 		this._processManager.onProcessShellTypeChanged(type => this.setShellType(type));
 		this._processManager.onPtyDisconnect(() => {
@@ -1386,7 +1392,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		// Set the new shell launch config
 		this._shellLaunchConfig = shell; // Must be done before calling _createProcess()
 
-		this._processManager.relaunch(this._shellLaunchConfig, this._cols, this._rows, this._accessibilityService.isScreenReaderOptimized(), reset);
+		this._processManager.relaunch(this._shellLaunchConfig, this._cols || Constants.DefaultCols, this._rows || Constants.DefaultRows, this._accessibilityService.isScreenReaderOptimized(), reset);
 
 		// Set title again as when creating the first process
 		if (this._shellLaunchConfig.name) {
