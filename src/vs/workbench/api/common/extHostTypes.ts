@@ -1755,9 +1755,8 @@ export enum TaskPanelKind {
 }
 
 @es5ClassCompat
-export class TaskGroup implements vscode.TaskGroup2 {
+export class TaskGroup implements vscode.TaskGroup {
 
-	isDefault?: boolean;
 	private _id: string;
 
 	public static Clean: TaskGroup = new TaskGroup('clean', 'Clean');
@@ -3303,7 +3302,7 @@ export enum TestMessageSeverity {
 	Hint = 3
 }
 
-export enum TestRunConfigurationGroup {
+export enum TestRunProfileGroup {
 	Run = 1,
 	Debug = 2,
 	Coverage = 3,
@@ -3314,7 +3313,7 @@ export class TestRunRequest implements vscode.TestRunRequest {
 	constructor(
 		public readonly include?: vscode.TestItem[],
 		public readonly exclude?: vscode.TestItem[] | undefined,
-		public readonly configuration?: vscode.TestRunConfiguration,
+		public readonly profile?: vscode.TestRunProfile,
 	) { }
 }
 

@@ -47,6 +47,7 @@ import { ExtensionActivationReason } from 'vs/workbench/api/common/extHostExtens
 import { ExtHostInteractive } from 'vs/workbench/api/common/extHostInteractive';
 import { TunnelDto } from 'vs/workbench/api/common/extHostTunnelService';
 import { DebugConfigurationProviderTriggerKind, TestResultState } from 'vs/workbench/api/common/extHostTypes';
+import { TreeDataTransferDTO } from 'vs/workbench/api/common/shared/treeDataTransfer';
 import * as tasks from 'vs/workbench/api/common/shared/tasks';
 import { SaveReason } from 'vs/workbench/common/editor';
 import { IRevealOptions, ITreeItem } from 'vs/workbench/common/views';
@@ -57,7 +58,7 @@ import { ICellRange } from 'vs/workbench/contrib/notebook/common/notebookRange';
 import { InputValidationType } from 'vs/workbench/contrib/scm/common/scm';
 import { ITextQueryBuilderOptions } from 'vs/workbench/contrib/search/common/queryBuilder';
 import { ISerializableEnvironmentVariableCollection } from 'vs/workbench/contrib/terminal/common/environmentVariable';
-import { ExtensionRunTestsRequest, ISerializedTestResults, ITestItem, ITestMessage, ITestRunTask, RunTestForControllerRequest, ResolvedTestRunRequest, ITestIdWithSrc, TestsDiff, IFileCoverage, CoverageDetails, ITestRunConfiguration } from 'vs/workbench/contrib/testing/common/testCollection';
+import { ExtensionRunTestsRequest, ISerializedTestResults, ITestItem, ITestMessage, ITestRunTask, RunTestForControllerRequest, ResolvedTestRunRequest, ITestIdWithSrc, TestsDiff, IFileCoverage, CoverageDetails, ITestRunProfile } from 'vs/workbench/contrib/testing/common/testCollection';
 import { InternalTimelineOptions, Timeline, TimelineChangeEvent, TimelineOptions, TimelineProviderDescriptor } from 'vs/workbench/contrib/timeline/common/timeline';
 import { TypeHierarchyItem } from 'vs/workbench/contrib/typeHierarchy/common/typeHierarchy';
 import { EditorGroupColumn } from 'vs/workbench/services/editor/common/editorGroupColumn';
@@ -470,6 +471,7 @@ export interface TerminalLaunchConfig {
 	cwd?: string | UriComponents;
 	env?: ITerminalEnvironment;
 	icon?: URI | { light: URI; dark: URI } | ThemeIcon;
+	color?: string;
 	initialText?: string;
 	waitOnExit?: boolean;
 	strictEnv?: boolean;
@@ -1239,7 +1241,7 @@ export interface ExtHostDocumentsAndEditorsShape {
 
 export interface ExtHostTreeViewsShape {
 	$getChildren(treeViewId: string, treeItemHandle?: string): Promise<ITreeItem[]>;
-	$onDrop(treeViewId: string, treeItemHandle: string[], newParentTreeItemHandle: string): Promise<void>;
+	$onDrop(treeViewId: string, treeDataTransfer: TreeDataTransferDTO, newParentTreeItemHandle: string): Promise<void>;
 	$setExpanded(treeViewId: string, treeItemHandle: string, expanded: boolean): void;
 	$setSelection(treeViewId: string, treeItemHandles: string[]): void;
 	$setVisible(treeViewId: string, visible: boolean): void;
@@ -2097,7 +2099,7 @@ export interface ExtHostTestingShape {
 	 */
 	$resolveFileCoverage(runId: string, taskId: string, fileIndex: number, token: CancellationToken): Promise<CoverageDetails[]>;
 	/** Configures a test run config. */
-	$configureRunConfig(controllerId: string, configId: number): void;
+	$configureRunProfile(controllerId: string, configId: number): void;
 }
 
 export interface MainThreadTestingShape {
@@ -2119,11 +2121,11 @@ export interface MainThreadTestingShape {
 	// --- test run configurations:
 
 	/** Called when a new test run configuration is available */
-	$publishTestRunConfig(config: ITestRunConfiguration): void;
+	$publishTestRunProfile(config: ITestRunProfile): void;
 	/** Updates an existing test run configuration */
-	$updateTestRunConfig(controllerId: string, configId: number, update: Partial<ITestRunConfiguration>): void;
+	$updateTestRunConfig(controllerId: string, configId: number, update: Partial<ITestRunProfile>): void;
 	/** Removes a previously-published test run config */
-	$removeTestRunConfig(controllerId: string, configId: number): void;
+	$removeTestProfile(controllerId: string, configId: number): void;
 
 
 	// --- test run handling:

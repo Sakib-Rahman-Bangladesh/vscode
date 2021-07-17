@@ -202,6 +202,7 @@ export interface ITerminalEditorService extends ITerminalInstanceHost, ITerminal
 	detachActiveEditorInstance(): ITerminalInstance;
 	detachInstance(instance: ITerminalInstance): void;
 	splitInstance(instanceToSplit: ITerminalInstance, shellLaunchConfig?: IShellLaunchConfig): ITerminalInstance;
+	revealActiveEditor(preserveFocus?: boolean): void
 }
 
 /**
@@ -338,8 +339,8 @@ export interface ITerminalInstance {
 	readonly instanceId: number;
 	/**
 	 * A unique URI for this terminal instance with the following encoding:
-	 * path: Title
-	 * fragment: workspace ID / instance ID
+	 * path: /<workspace ID>/<instance ID>
+	 * fragment: Title
 	 */
 	readonly resource: URI;
 

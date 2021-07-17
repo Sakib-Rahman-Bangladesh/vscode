@@ -639,6 +639,9 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			},
 			createTerminal(nameOrOptions?: vscode.TerminalOptions | vscode.ExtensionTerminalOptions | string, shellPath?: string, shellArgs?: string[] | string): vscode.Terminal {
 				if (typeof nameOrOptions === 'object') {
+					if (nameOrOptions.color) {
+						checkProposedApiEnabled(extension);
+					}
 					if ('pty' in nameOrOptions) {
 						return extHostTerminalService.createExtensionTerminal(nameOrOptions);
 					}
@@ -1223,9 +1226,7 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			SymbolKind: extHostTypes.SymbolKind,
 			SymbolTag: extHostTypes.SymbolTag,
 			Task: extHostTypes.Task,
-			Task2: extHostTypes.Task,
 			TaskGroup: extHostTypes.TaskGroup,
-			TaskGroup2: extHostTypes.TaskGroup,
 			TaskPanelKind: extHostTypes.TaskPanelKind,
 			TaskRevealKind: extHostTypes.TaskRevealKind,
 			TaskScope: extHostTypes.TaskScope,
@@ -1272,7 +1273,7 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			TestResultState: extHostTypes.TestResultState,
 			TestRunRequest: extHostTypes.TestRunRequest,
 			TestMessage: extHostTypes.TestMessage,
-			TestRunConfigurationGroup: extHostTypes.TestRunConfigurationGroup,
+			TestRunProfileGroup: extHostTypes.TestRunProfileGroup,
 			TextSearchCompleteMessageType: TextSearchCompleteMessageType,
 			TestMessageSeverity: extHostTypes.TestMessageSeverity,
 			CoveredCount: extHostTypes.CoveredCount,
